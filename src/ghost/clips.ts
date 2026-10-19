@@ -44,6 +44,19 @@ export interface GhostClip {
 
 export const GHOST_CLIPS: GhostClip[] = [
   {
+    // Flow(Veo) 생성본. 몸을 옆으로 기울여 내다보다 천천히 세워 정면을 봄 → 왕복 재생.
+    // 원본: ghost-raw/peeking_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/peeking_test_720p.mp4 peeking --cover 90x90 --height 1280 --fps 24 --pingpong
+    id: 'peeking',
+    src: '/ghosts/peeking.mp4',
+    aspect: 0.5594,
+    // 선 인물이 프레임 높이의 약 93%를 차지 → 키 약 1.65m
+    frameHeightM: 1.8,
+    footV: 0.04,
+    roles: ['peeking'],
+    stepFps: 12,
+  },
+  {
     // Flow(Veo) 생성본. 무릎을 끌어안고 고개를 숙였다가 천천히 들어 올림 → 왕복 재생으로 다시 숙임.
     // 원본: ghost-raw/crouched_test_720p.mp4
     // 변환: scripts/make-ghost-clip.sh ghost-raw/crouched_test_720p.mp4 crouched --cover 90x90 --height 1280 --fps 24 --pingpong

@@ -3,7 +3,7 @@ import { SoundManager } from '../audio/SoundManager';
 import { GhostRole } from '../ghost/clips';
 import { VideoGhost } from '../ghost/VideoGhost';
 import { VideoClipPool } from '../ghost/VideoClipPool';
-import { LightPool } from './Lighting';
+import { LIGHT_FULL, LightPool } from './Lighting';
 import {
   CorridorFrame,
   DIRS,
@@ -385,14 +385,26 @@ export class Haunts {
     const sides = (Object.keys(DIRS) as Dir[]).filter(
       (d) => d !== approach && edgeOpen(i, j, d) && DIRS[d].di * a.di + DIRS[d].dj * a.dj === 0
     );
-    if (sides.length === 0) return false;
-    const d = DIRS[pick(sides)];
+    // 플레이어가 S/W 쪽 복도에서 오면 그 복도 끝(이 교차로 쪽)에 반쯤 열린 문짝이 있고,
+    // 문짝은 플레이어가 볼 때 항상 왼쪽 → 왼쪽 모퉁이는 가려지므로 오른쪽만 사용
+    const doorOnLeft = approach === 'S' || approach === 'W';
+    const isRight = (dd: Dir) => DIRS[dd].di * a.dj + DIRS[dd].dj * -a.di > 0;
+    const usable = doorOnLeft ? sides.filter(isRight) : sides;
+    if (usable.length === 0) return false;
+    const d = DIRS[pick(usable)];
     // 교차로 안, 플레이어 쪽 문틀 가장자리에 몸이 반쯤 걸리는 자리 → 옆 복도로 숨음
-    const x = c.x + d.di * 0.8 - a.di * 0.2;
-    const z = c.z + d.dj * 0.8 - a.dj * 0.2;
+    const x = c.x + d.di * 0.55 - a.di * 0.2;
+    const z = c.z + d.dj * 0.55 - a.dj * 0.2;
     h.peekDir = { x: d.di, z: d.dj };
+    // 교차로 조명이 꺼져 있거나 흐리면 문틀 너머 어둠에 묻혀 안 보이므로 켜 둠
+    this.lights.ensureLit(c.x, c.z, LIGHT_FULL * 0.6);
     const g = new VideoGhost(ROLE.peek, this.pool);
     g.root.position.set(x, 0, z);
+    // 영상 속 귀신은 화면 왼쪽(복도 가운데 쪽)으로 몸을 기울임.
+    // 플레이어가 볼 때 귀신이 왼쪽 모퉁이에 있으면 좌우를 뒤집어 항상 가운데 쪽으로 내다보게 함.
+    // 플레이어 시선 = -a, 화면 오른쪽 = (a.dj, -a.di)
+    const onRight = d.di * a.dj + d.dj * -a.di > 0; // isRight와 같은 계산
+    if (!onRight) g.body.scale.x = -1;
     h.ghost = g;
     this.scene.add(g.root);
     return true;

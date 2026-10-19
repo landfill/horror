@@ -102,6 +102,18 @@ export class LightPool {
     return Math.min(1, 0.05 + sum);
   }
 
+  /**
+   * (x, z) 근처 기구를 켜 둠. 어둠에 완전히 묻히면 안 되는 연출(모퉁이 엿보기)용.
+   * 반경 안에 기구가 없으면 아무것도 하지 않음.
+   */
+  public ensureLit(x: number, z: number, minBase: number, radius = 3): void {
+    for (const f of this.list()) {
+      if (Math.hypot(f.x - x, f.z - z) > radius) continue;
+      f.dead = false;
+      f.base = Math.max(f.base, minBase);
+    }
+  }
+
   /** 가장 가까운 기구 하나를 꺼뜨림 (귀신과 마주친 뒤 어둠 속에 남겨두는 연출) */
   public killNearest(x: number, z: number): void {
     let best: Fixture | null = null;
