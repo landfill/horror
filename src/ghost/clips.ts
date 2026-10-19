@@ -39,6 +39,18 @@ export interface GhostClip {
 
 export const GHOST_CLIPS: GhostClip[] = [
   {
+    // Flow(Veo) 생성본. 원본: ghost-raw/standing_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/standing_test_720p.mp4 standing --cover 90x90 --height 1280 --fps 24
+    id: 'standing',
+    src: '/ghosts/standing.mp4',
+    aspect: 0.5594,
+    // 인물이 프레임 높이의 약 85%를 차지 → 키 약 1.65m로 보이게
+    frameHeightM: 1.94,
+    footV: 0.06,
+    roles: ['standing'],
+    stepFps: 12,
+  },
+  {
     id: 'test_placeholder',
     src: '/ghosts/test_placeholder.mp4',
     srcReversed: '/ghosts/test_placeholder_rev.mp4',

@@ -2,3 +2,7 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# 원본 귀신 영상 (변환본은 public/ghosts/)
+ghost-raw/*
+!ghost-raw/README.md

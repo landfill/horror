@@ -177,10 +177,11 @@ export class VideoGhost {
       color: 0x000000,
       alphaMap: getContactShadowTexture(),
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.55,
       depthWrite: false,
     });
-    this.shadow = new THREE.Mesh(new THREE.CircleGeometry(w * 0.75, 20), shadowMat);
+    // 판 폭이 아니라 사람 발밑 크기 정도로 (판은 인물보다 넓을 수 있음)
+    this.shadow = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w * 0.75, 0.42), 20), shadowMat);
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.y = 0.012;
     this.shadow.scale.set(1, 0.6, 1);
@@ -249,7 +250,7 @@ export class VideoGhost {
       // 바닥에 서 있을 때만 접지 그림자 (허공에 매달린 경우 제외)
       const onFloor = wp.y < 0.1;
       this.shadow.visible = onFloor;
-      this.shadow.material.opacity = 0.7 * this.opacity * (this.entry.ready ? 1 : 0);
+      this.shadow.material.opacity = 0.55 * this.opacity * (this.entry.ready ? 1 : 0);
     }
   }
 
