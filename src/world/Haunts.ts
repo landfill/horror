@@ -74,11 +74,26 @@ function pickWeighted(kinds: HauntKind[]): HauntKind | null {
 }
 
 /** 활성화된 뒤 이 시간 동안 한 번도 안 보이면 내려놓고 다른 귀신에게 차례를 넘김 */
-const UNSEEN_RELEASE_SEC = 25;
+const UNSEEN_RELEASE_SEC = 15;
 /** 따라오는 귀신이 이 시간 동안 한 번도 안 보이면 포기하고 사라짐 */
 const FOLLOWER_GIVEUP_SEC = 35;
 /** 따라오는 귀신은 최대 이 시간까지만 (다른 귀신에게도 차례가 가도록) */
-const FOLLOWER_MAX_SEC = 60;
+const FOLLOWER_MAX_SEC = 45;
+
+// 출현 빈도 (값을 바꾸면 전체 빈도가 조절됨)
+/** 복도 하나에 귀신이 배치될 확률 */
+const CORRIDOR_SPAWN_P = 0.6;
+/** 교차로 하나에 모퉁이 엿보기가 배치될 확률 */
+const JUNCTION_PEEK_P = 0.24;
+/** 귀신이 끝난 뒤 다음 귀신까지 쉬는 시간(초): 마주침 / 조용히 사라짐 / 다가가자 사라짐 / 추적자 포기 */
+const REST_AFTER_JOLT = 17;
+const REST_AFTER_VANISH = 10;
+const REST_AFTER_NEAR = 12;
+const REST_AFTER_GIVEUP = 5;
+/** 추적자 등장 간격(초): 처음 / 마주친 뒤 / 포기한 뒤 */
+const FOLLOWER_FIRST: [number, number] = [30, 50];
+const FOLLOWER_AFTER_JOLT: [number, number] = [45, 75];
+const FOLLOWER_AFTER_GIVEUP: [number, number] = [30, 50];
 
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
@@ -133,14 +148,14 @@ export class Haunts {
   private haunts: Haunt[] = [];
   private active: Haunt | null = null;
   private nextId = 1;
-  private cooldown = DEBUG ? 0 : 20;
+  private cooldown = DEBUG ? 0 : 10;
 
   // 추적자(follower): 플레이어가 지나온 길을 그대로 따라옴
   private crumbs: Crumb[] = [];
   private follower: Haunt | null = null;
   private followerS = 0;
   private followerStage = 0;
-  private followerTimer = FORCE === 'follower' ? 3 : DEBUG ? 20 : rand(60, 100);
+  private followerTimer = FORCE === 'follower' ? 3 : DEBUG ? 20 : rand(...FOLLOWER_FIRST);
   private followerWasSeen = false;
 
   private camPos = new THREE.Vector3();
@@ -168,7 +183,7 @@ export class Haunts {
   public onCorridorBuilt(cell: string, zone: ZoneKind, frame: CorridorFrame, _group: THREE.Group): void {
     if (FORCE === 'peek' || FORCE === 'follower') return;
     if (!DEBUG && this.nearStart(cell)) return;
-    if (!DEBUG && Math.random() > 0.3) return;
+    if (!DEBUG && Math.random() > CORRIDOR_SPAWN_P) return;
     const kind = FORCE ?? pickWeighted(CORRIDOR_KINDS[zone]);
     if (!kind) return;
     // 학교 복도는 오른쪽 벽에 사물함이 있어 벽 귀신이 묻힘 → 왼쪽 벽만
@@ -179,7 +194,7 @@ export class Haunts {
   public onJunctionBuilt(cell: string, i: number, j: number, _zone: ZoneKind, _root: THREE.Group): void {
     if (FORCE && FORCE !== 'peek') return;
     if (!DEBUG && this.nearStart(cell)) return;
-    const p = FORCE === 'peek' ? 1 : DEBUG ? 0.3 : 0.12;
+    const p = FORCE === 'peek' ? 1 : DEBUG ? 0.3 : JUNCTION_PEEK_P;
     if (Math.random() > p) return;
     this.haunts.push(this.newHaunt(cell, 'peek', { junction: { i, j } }));
   }
@@ -290,12 +305,12 @@ export class Haunts {
     this.sound.playVhsStatic(0.45);
     this.sound.playDeathRattle({ x: at.x, y: Math.min(at.y + 0.6, SEG_H), z: at.z });
     this.lights.killNearest(at.x, at.z);
-    this.finish(h, 35);
+    this.finish(h, REST_AFTER_JOLT);
   }
 
   /** 다시 보면 없어져 있음 (조용히) */
   private vanishQuietly(h: Haunt): void {
-    this.finish(h, 20);
+    this.finish(h, REST_AFTER_VANISH);
   }
 
   // -------------------------------------------------------------------------
@@ -586,7 +601,7 @@ export class Haunts {
     if (dist < 4) {
       this.world.flash(0.15, 0.3);
       this.sound.playFootstep(true, { x: this.camPos.x, y: 0.1, z: this.camPos.z });
-      this.finish(h, 25);
+      this.finish(h, REST_AFTER_NEAR);
     }
   }
 
@@ -756,7 +771,7 @@ export class Haunts {
       }
       if (behind < 1.8 && h.seenTime > 0.2) {
         this.jolt(h, this.center(h));
-        this.followerTimer = DEBUG ? 15 : rand(90, 150);
+        this.followerTimer = DEBUG ? 15 : rand(...FOLLOWER_AFTER_JOLT);
       }
       return;
     }
@@ -766,8 +781,8 @@ export class Haunts {
     // 너무 멀어지면 놓침
     // 너무 멀어지거나, 오랫동안 돌아보지 않으면 포기 (붙은 채로 다른 귀신을 계속 막지 않게)
     if (behind > 30 || h.unseenTime > FOLLOWER_GIVEUP_SEC || h.moved > FOLLOWER_MAX_SEC) {
-      this.finish(h, 10);
-      this.followerTimer = rand(60, 100);
+      this.finish(h, REST_AFTER_GIVEUP);
+      this.followerTimer = rand(...FOLLOWER_AFTER_GIVEUP);
       return;
     }
     const target = trail[this.followerStage];
