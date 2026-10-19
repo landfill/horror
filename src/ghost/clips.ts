@@ -29,6 +29,11 @@ export interface GhostClip {
   frameHeightM: number;
   /** 발이 닿는 위치. 색상 프레임 아래에서부터의 비율 (0 = 맨 아래) */
   footV: number;
+  /**
+   * 천장에 거꾸로 매달린 영상일 때: 손발이 천장에 닿는 높이 (프레임 위에서부터의 비율).
+   * 있으면 그 지점이 천장에 오도록 판을 매달고, 플레이어 쪽을 향해 돌림. footV는 쓰지 않음.
+   */
+  hangV?: number;
   /** 이 영상을 쓸 수 있는 연출 */
   roles: GhostRole[];
   /** 끊김 연출 기본 프레임레이트. 낮을수록 동작이 뚝뚝 끊깁니다. 0이면 원본 그대로. */
@@ -38,6 +43,33 @@ export interface GhostClip {
 }
 
 export const GHOST_CLIPS: GhostClip[] = [
+  {
+    // Flow(Veo) 생성본. 무릎을 끌어안고 고개를 숙였다가 천천히 들어 올림 → 왕복 재생으로 다시 숙임.
+    // 원본: ghost-raw/crouched_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/crouched_test_720p.mp4 crouched --cover 90x90 --height 1280 --fps 24 --pingpong
+    id: 'crouched',
+    src: '/ghosts/crouched.mp4',
+    aspect: 0.5594,
+    // 웅크려 앉은 인물(고개를 들었을 때 약 1m)이 프레임의 약 84%를 차지
+    frameHeightM: 1.2,
+    footV: 0.04,
+    roles: ['crouched'],
+    stepFps: 12,
+  },
+  {
+    // Flow(Veo) 생성본. 천장에 손발을 붙이고 거꾸로 매달린 모습을 옆에서 본 영상.
+    // 원본: ghost-raw/ceiling_hanging_v3_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/ceiling_hanging_v3_720p.mp4 ceiling --cover 90x90 --height 1280 --fps 24
+    id: 'ceiling',
+    src: '/ghosts/ceiling.mp4',
+    aspect: 0.5594,
+    // 천장에서 늘어진 몸이 약 1.2m → 가장 낮은 곳이 약 1.9m (지나갈 때 머리에 닿지 않게)
+    frameHeightM: 1.7,
+    footV: 0,
+    hangV: 0.11,
+    roles: ['ceiling'],
+    stepFps: 12,
+  },
   {
     // Flow(Veo) 생성본. 벽을 기어오르는 뒷모습, 머리가 프레임 위쪽 → 앱이 벽에 눕혀 붙임.
     // 원본: ghost-raw/wallcrawl_test_720p.mp4

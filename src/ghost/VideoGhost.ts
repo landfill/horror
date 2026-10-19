@@ -137,6 +137,8 @@ export class VideoGhost {
   /** true면 현재 프레임에서 멈춤 (보고 있는 동안 얼어붙는 연출) */
   public freeze = false;
   private billboardOn: boolean;
+  /** 천장에 매달리는 영상인지 (clips.ts의 hangV) */
+  public readonly hangs: boolean;
   private plane: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
   private shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial> | null = null;
   private fallback: GhostFigure | null = null;
@@ -149,6 +151,9 @@ export class VideoGhost {
     this.pool = pool;
     this.billboardOn = opts.billboard ?? true;
     this.clip = clipForRole(role);
+    this.hangs = this.clip?.hangV !== undefined;
+    // 매달린 영상은 옆모습이라 항상 플레이어를 향해야 함
+    if (this.hangs) this.billboardOn = true;
     this.root.add(this.body);
 
     if (!this.clip) {
@@ -163,7 +168,13 @@ export class VideoGhost {
     const w = h * this.clip.aspect;
     const geo = new THREE.PlaneGeometry(w, h);
     // 발 위치가 y=0에 오도록 판을 올림
-    geo.translate(0, h / 2 - this.clip.footV * h, 0);
+    if (this.clip.hangV !== undefined) {
+      // 천장에 닿는 지점이 y=0, 몸은 그 아래로 늘어짐
+      geo.translate(0, -(h / 2 - this.clip.hangV * h), 0);
+    } else {
+      // 발 위치가 y=0에 오도록 판을 올림
+      geo.translate(0, h / 2 - this.clip.footV * h, 0);
+    }
 
     const mat = acquireMaterial();
     mat.uniforms.map.value = this.entry.texture;

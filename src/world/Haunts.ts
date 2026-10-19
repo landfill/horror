@@ -203,7 +203,8 @@ export class Haunts {
     let y = 1.0;
     switch (h.kind) {
       case 'ceiling':
-        y = SEG_H - 0.1;
+        // 매달린 영상은 몸 가운데(천장 아래 약 0.7m), 천장에 누운 판은 천장 바로 아래
+        y = h.ghost?.hangs ? SEG_H - 0.7 : SEG_H - 0.1;
         break;
       case 'wallcrawl':
         y = 1.55;
@@ -330,8 +331,9 @@ export class Haunts {
         g = new VideoGhost(role, this.pool, { billboard: false, shadow: false });
         h.lx = rand(-0.4, 0.4);
         h.lz = mid();
-        // 천장에 누운 판: 얼굴이 아래를 향하고, 머리는 복도 시작(+z) 쪽
-        g.body.rotation.x = Math.PI / 2;
+        // 위에서 찍은 영상은 천장에 눕힘 (얼굴이 아래를 향하고, 머리는 복도 시작(+z) 쪽).
+        // 매달린 옆모습 영상은 VideoGhost가 천장에서 늘어뜨려 플레이어를 향하게 함.
+        if (!g.hangs) g.body.rotation.x = Math.PI / 2;
         break;
       }
       case 'wallcrawl': {
@@ -411,8 +413,8 @@ export class Haunts {
     if (!h.ghost || !h.frame) return;
     const g = h.ghost;
     if (h.kind === 'ceiling') {
-      // 판의 발 쪽이 원점이므로 중심이 (lx, lz)에 오도록 0.95m 당김
-      const w = corridorToWorld(h.frame, h.lx, h.lz - 0.95);
+      // 천장에 누운 판은 발 쪽이 원점이므로 중심이 (lx, lz)에 오도록 0.95m 당김
+      const w = corridorToWorld(h.frame, h.lx, g.hangs ? h.lz : h.lz - 0.95);
       g.root.position.set(w.x, SEG_H - 0.03, w.z);
       return;
     }

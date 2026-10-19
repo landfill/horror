@@ -20,6 +20,8 @@
 #   --intra             모든 프레임을 키프레임으로 인코딩 (프레임 탐색/역방향 스텝용, 파일 커짐)
 #   --reverse           역재생 버전(<출력이름>_rev.mp4)도 함께 생성
 #   --start S --dur D   입력에서 S초부터 D초만 사용
+#   --pingpong          끝까지 재생한 뒤 거꾸로 재생해 처음으로 돌아옴 (길이 2배).
+#                       고개를 들었다 숙이는 것처럼 한 방향 동작이 끝나는 영상에 적합
 #   --loopfade S        끝 S초를 처음과 겹쳐 서서히 넘어가게 함 (영상 안에서 귀신이 이동해
 #                       반복할 때 위치가 튀는 경우. 결과는 S초 짧아짐. 예: 1.2)
 #   --out DIR           출력 폴더 (기본 public/ghosts)
@@ -30,13 +32,13 @@
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-  sed -n '2,32p' "$0"
+  sed -n '2,34p' "$0"
   exit 1
 fi
 
 IN="$1"; NAME="$2"; shift 2
 KEY=green; KEYER=diff; LO=25; HI=70; SIM=""; BLEND=0.06; COLOR=""; COVER=""; HEIGHT=960; FPS=30; INTRA=0; REVERSE=0
-START=""; DUR=""; OUT=public/ghosts; LOOPFADE=""
+START=""; DUR=""; OUT=public/ghosts; LOOPFADE=""; PINGPONG=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +57,7 @@ while [ $# -gt 0 ]; do
     --start) START="$2"; shift 2 ;;
     --dur) DUR="$2"; shift 2 ;;
     --loopfade) LOOPFADE="$2"; shift 2 ;;
+    --pingpong) PINGPONG=1; shift ;;
     --out) OUT="$2"; shift 2 ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
   esac
@@ -111,6 +114,11 @@ if [ -n "$LOOPFADE" ]; then
   [ -n "$START" ] && [ -z "$DUR" ] && D=$(awk "BEGIN { print $D - $START }")
   OFF=$(awk "BEGIN { print $D - 2 * $LOOPFADE }")
   PRE="fps=${FPS},split[lx][ly];[lx]trim=start=${LOOPFADE},setpts=PTS-STARTPTS[la];[ly]trim=end=${LOOPFADE},setpts=PTS-STARTPTS[lb];[la][lb]xfade=transition=fade:duration=${LOOPFADE}:offset=${OFF},${PRE}"
+fi
+
+# 왕복 재생: 정방향 + 역방향을 이어 붙임 (마지막 한 프레임은 겹치지 않게 뺌)
+if [ $PINGPONG -eq 1 ]; then
+  PRE="fps=${FPS},split[pf][pr];[pr]reverse,trim=start_frame=1,setpts=PTS-STARTPTS[pb];[pf][pb]concat=n=2:v=1:a=0,${PRE}"
 fi
 
 if [ "$KEY" = green ] && [ "$KEYER" != chroma ]; then
