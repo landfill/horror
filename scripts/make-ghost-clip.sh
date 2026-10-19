@@ -72,7 +72,8 @@ case "$KEY" in
       # 초록 초과량 = G - max(R, B). 흰 옷·피부·머리카락은 거의 0, 초록 배경은 크게 나옴.
       # AI 영상처럼 초록이 탁해도 몸이 비치지 않음. 초록 번짐도 같이 제거(despill).
       EX="(g(X,Y)-max(r(X,Y),b(X,Y)))"
-      KEYF="geq=r='r(X,Y)':g='min(g(X,Y),max(r(X,Y),b(X,Y)))':b='b(X,Y)':a='clip(255*(1-(${EX}-${LO})/(${HI}-${LO})),0,255)'"
+      AEXPR="clip(255*(1-(${EX}-${LO})/(${HI}-${LO})),0,255)"
+      KEYF="" # 아래에서 AEXPR로 만듦 (워터마크 영역 처리 후)
     fi ;;
   black) SIM="${SIM:-0.10}"; KEYF="format=yuva444p,colorkey=color=${COLOR:-0x000000}:similarity=${SIM}:blend=${BLEND},format=rgba" ;;
   *) echo "--key는 green 또는 black" >&2; exit 1 ;;
@@ -92,8 +93,16 @@ GOP=$([ $INTRA -eq 1 ] && echo 1 || echo "$FPS")
 PRE="crop=iw-8:ih-8:4:4,"
 if [ -n "$COVER" ]; then
   CW="${COVER%x*}"; CH="${COVER#*x}"
-  FILL="$([ "$KEY" = green ] && echo 0x00FF00 || echo "${COLOR:-0x000000}")"
-  PRE="drawbox=x=iw-${CW}:y=ih-${CH}:w=${CW}:h=${CH}:color=${FILL}:t=fill,${PRE}"
+  if [ "$KEY" = green ] && [ "$KEYER" != chroma ]; then
+    # 마스크에서 직접 투명하게 (색을 덮으면 크기 조정 때 가장자리 자국이 남음)
+    SW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$IN")
+    SH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$IN")
+    FX=$(awk "BEGIN { print 1 - $CW / $SW }"); FY=$(awk "BEGIN { print 1 - $CH / $SH }")
+    AEXPR="${AEXPR}*not(gt(X,W*${FX})*gt(Y,H*${FY}))"
+  else
+    FILL="${COLOR:-0x000000}"
+    PRE="drawbox=x=iw-${CW}:y=ih-${CH}:w=${CW}:h=${CH}:color=${FILL}:t=fill,${PRE}"
+  fi
 fi
 
 # 반복 이음매: [S, 끝] 구간 뒤에 [0, S] 구간을 S초 동안 겹쳐 녹임 → 마지막 프레임이 첫 프레임으로 자연스럽게 이어짐
@@ -102,6 +111,10 @@ if [ -n "$LOOPFADE" ]; then
   [ -n "$START" ] && [ -z "$DUR" ] && D=$(awk "BEGIN { print $D - $START }")
   OFF=$(awk "BEGIN { print $D - 2 * $LOOPFADE }")
   PRE="fps=${FPS},split[lx][ly];[lx]trim=start=${LOOPFADE},setpts=PTS-STARTPTS[la];[ly]trim=end=${LOOPFADE},setpts=PTS-STARTPTS[lb];[la][lb]xfade=transition=fade:duration=${LOOPFADE}:offset=${OFF},${PRE}"
+fi
+
+if [ "$KEY" = green ] && [ "$KEYER" != chroma ]; then
+  KEYF="geq=r='r(X,Y)':g='min(g(X,Y),max(r(X,Y),b(X,Y)))':b='b(X,Y)':a='${AEXPR}'"
 fi
 
 BASE="${PRE}scale=-2:${HEIGHT}:flags=lanczos,fps=${FPS},format=rgba,${KEYF},premultiply=inplace=1,format=rgba"

@@ -75,6 +75,7 @@ interface Haunt {
   lz: number;
   /** 벽 쪽 (-1 왼쪽 / 1 오른쪽) */
   side: number;
+  zone?: ZoneKind;
   /** 엿보기: 숨는 방향 */
   peekDir?: { x: number; z: number };
   ghost: VideoGhost | null;
@@ -141,7 +142,9 @@ export class Haunts {
     if (!DEBUG && this.nearStart(cell)) return;
     if (!DEBUG && Math.random() > 0.3) return;
     const kind = FORCE ?? pick(CORRIDOR_KINDS[zone]);
-    this.haunts.push(this.newHaunt(cell, kind, { frame }));
+    // 학교 복도는 오른쪽 벽에 사물함이 있어 벽 귀신이 묻힘 → 왼쪽 벽만
+    const side = zone === 'school' ? -1 : Math.random() < 0.5 ? -1 : 1;
+    this.haunts.push(this.newHaunt(cell, kind, { frame, zone, side }));
   }
 
   public onJunctionBuilt(cell: string, i: number, j: number, _zone: ZoneKind, _root: THREE.Group): void {
@@ -203,7 +206,7 @@ export class Haunts {
         y = SEG_H - 0.1;
         break;
       case 'wallcrawl':
-        y = 1.25;
+        y = 1.55;
         lz = h.lz + this.headSign(h) * 0.95;
         lx = h.side * (HALF - 0.08);
         break;
@@ -335,7 +338,7 @@ export class Haunts {
         g = new VideoGhost(role, this.pool, { billboard: false, shadow: false });
         h.lz = far();
         h.lx = h.side * (HALF - 0.03);
-        g.body.position.y = 1.25;
+        g.body.position.y = 1.55; // 눈높이 근처, 벽 높은 곳
         break;
       }
       case 'crouched': {
@@ -723,7 +726,7 @@ export class Haunts {
   public debugState(): object {
     const h = this.active;
     return {
-      active: h ? { kind: h.kind, dir: h.frame?.dir, lz: +h.lz.toFixed(2), seenTime: +h.seenTime.toFixed(2), everSeen: h.everSeen, pos: h.ghost?.root.position.toArray().map((v) => +v.toFixed(2)) } : null,
+      active: h ? { kind: h.kind, dir: h.frame?.dir, lz: +h.lz.toFixed(2), side: h.side, zone: h.zone, seenTime: +h.seenTime.toFixed(2), everSeen: h.everSeen, pos: h.ghost?.root.position.toArray().map((v) => +v.toFixed(2)) } : null,
       followerBehind: this.follower ? +(this.playerS() - this.followerS).toFixed(2) : null,
       followerStage: this.followerStage,
       seen: this.lastSeenDebug,

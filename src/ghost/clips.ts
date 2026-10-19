@@ -39,6 +39,18 @@ export interface GhostClip {
 
 export const GHOST_CLIPS: GhostClip[] = [
   {
+    // Flow(Veo) 생성본. 벽을 기어오르는 뒷모습, 머리가 프레임 위쪽 → 앱이 벽에 눕혀 붙임.
+    // 원본: ghost-raw/wallcrawl_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/wallcrawl_test_720p.mp4 wallcrawl --cover 90x90 --height 1280 --fps 24 --loopfade 1.0 --lo 20 --hi 45
+    id: 'wallcrawl',
+    src: '/ghosts/wallcrawl.mp4',
+    aspect: 0.5594,
+    frameHeightM: 1.92,
+    footV: 0.05,
+    roles: ['wallcrawl'],
+    stepFps: 12,
+  },
+  {
     // Flow(Veo) 생성본. 카메라 쪽으로 걸어오는 영상이라 역재생본 없이 그대로 사용.
     // 원본: ghost-raw/approach_test_720p.mp4
     // 변환: scripts/make-ghost-clip.sh ghost-raw/approach_test_720p.mp4 approach --cover 90x90 --height 1280 --fps 24 --loopfade 1.2
