@@ -306,6 +306,11 @@ export class EndlessWorld {
   // 공개 도구
   // -------------------------------------------------------------------------
 
+  /** 디버그: 교차로 (i, j)에서 열린 방향 */
+  public debugOpenDirs(i: number, j: number): Dir[] {
+    return (['N', 'E', 'S', 'W'] as Dir[]).filter((d) => edgeOpen(i, j, d));
+  }
+
   /** 디버그: 주변 교차로의 복도 열림 상태 */
   public debugEdgeSnapshot(r = 2): string {
     const out: string[] = [];

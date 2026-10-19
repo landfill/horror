@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SoundManager } from '../audio/SoundManager';
-import { GhostRole } from '../ghost/clips';
+import { GhostRole, hasRealClip } from '../ghost/clips';
 import { VideoGhost } from '../ghost/VideoGhost';
 import { VideoClipPool } from '../ghost/VideoClipPool';
 import { LIGHT_FULL, LightPool } from './Lighting';
@@ -44,13 +44,41 @@ const DEACTIVATE_DIST = 34;
 const SEE_DIST = 22;
 const SEE_COS = 0.72; // 시야 중심에서 약 44도 안쪽
 
+/** 공간별로 나올 수 있는 복도 귀신 (비디오 대여점은 양쪽 진열장에 벽 귀신이 묻혀 제외) */
 const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
-  school: ['approach', 'watcher', 'ceiling', 'wallcrawl'],
-  apt404: ['suspended', 'ceiling', 'wallcrawl', 'watcher'],
-  tatami: ['crouched', 'ceiling', 'wallcrawl'],
-  video: ['floorcrawl', 'ceiling', 'floorcrawl'],
-  subway: ['approach', 'wallcrawl', 'watcher'],
+  school: ['approach', 'floorcrawl', 'ceiling', 'watcher', 'wallcrawl'],
+  apt404: ['approach', 'floorcrawl', 'ceiling', 'suspended', 'wallcrawl', 'watcher'],
+  tatami: ['approach', 'floorcrawl', 'ceiling', 'crouched', 'wallcrawl'],
+  video: ['approach', 'floorcrawl', 'ceiling'],
+  subway: ['approach', 'floorcrawl', 'ceiling', 'wallcrawl', 'watcher'],
 };
+
+/** 출현 비중: 천장·기어오기·다가오기를 다른 귀신의 3배로 */
+const KIND_WEIGHT: Partial<Record<HauntKind, number>> = {
+  ceiling: 3,
+  floorcrawl: 3,
+  approach: 3,
+};
+
+function pickWeighted(kinds: HauntKind[]): HauntKind | null {
+  // 실제 영상이 아직 없는(임시 영상뿐인) 귀신은 내보내지 않음
+  const usable = kinds.filter((k) => hasRealClip(ROLE[k]));
+  if (usable.length === 0) return null;
+  const total = usable.reduce((sum, k) => sum + (KIND_WEIGHT[k] ?? 1), 0);
+  let r = Math.random() * total;
+  for (const k of usable) {
+    r -= KIND_WEIGHT[k] ?? 1;
+    if (r <= 0) return k;
+  }
+  return usable[usable.length - 1];
+}
+
+/** 활성화된 뒤 이 시간 동안 한 번도 안 보이면 내려놓고 다른 귀신에게 차례를 넘김 */
+const UNSEEN_RELEASE_SEC = 25;
+/** 따라오는 귀신이 이 시간 동안 한 번도 안 보이면 포기하고 사라짐 */
+const FOLLOWER_GIVEUP_SEC = 35;
+/** 따라오는 귀신은 최대 이 시간까지만 (다른 귀신에게도 차례가 가도록) */
+const FOLLOWER_MAX_SEC = 60;
 
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
@@ -141,7 +169,8 @@ export class Haunts {
     if (FORCE === 'peek' || FORCE === 'follower') return;
     if (!DEBUG && this.nearStart(cell)) return;
     if (!DEBUG && Math.random() > 0.3) return;
-    const kind = FORCE ?? pick(CORRIDOR_KINDS[zone]);
+    const kind = FORCE ?? pickWeighted(CORRIDOR_KINDS[zone]);
+    if (!kind) return;
     // 학교 복도는 오른쪽 벽에 사물함이 있어 벽 귀신이 묻힘 → 왼쪽 벽만
     const side = zone === 'school' ? -1 : Math.random() < 0.5 ? -1 : 1;
     this.haunts.push(this.newHaunt(cell, kind, { frame, zone, side }));
@@ -273,11 +302,29 @@ export class Haunts {
   // 활성화 (보이지 않는 곳에서만 나타남)
   // -------------------------------------------------------------------------
 
+  /**
+   * 플레이어가 곧 보게 될 자리인지: 복도 귀신은 플레이어와 가장 가까운 교차로에 붙은 복도,
+   * 모퉁이 귀신은 그 교차로나 바로 옆 교차로. 평행한 복도나 먼 곁가지에서 준비돼
+   * 아무도 못 보는 일을 막음.
+   */
+  private onPlayersWay(h: Haunt): boolean {
+    const p = nearestNode(this.camPos.x, this.camPos.z);
+    const m = h.cell.match(/(-?\d+),(-?\d+)(?:,([NE]))?/);
+    if (!m) return false;
+    const i = Number(m[1]);
+    const j = Number(m[2]);
+    if (h.kind === 'peek') return Math.abs(i - p.i) + Math.abs(j - p.j) <= 1;
+    // 복도 (i,j)-N 은 (i,j)~(i,j-1), (i,j)-E 는 (i,j)~(i+1,j)
+    const [bi, bj] = m[3] === 'N' ? [i, j - 1] : [i + 1, j];
+    return (i === p.i && j === p.j) || (bi === p.i && bj === p.j);
+  }
+
   private tryActivate(): void {
     let best: Haunt | null = null;
     let bestD = Infinity;
     for (const h of this.haunts) {
       if (h.done || h.ghost) continue;
+      if (!this.onPlayersWay(h)) continue;
       const anchor = this.anchorPreview(h);
       if (!anchor) continue;
       const d = this.flatDist(anchor);
@@ -450,15 +497,15 @@ export class Haunts {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recordCrumb(playerPos);
 
-    // 1. 활성 귀신이 없으면 하나 준비
-    if (!this.active && this.cooldown <= 0) this.tryActivate();
-
-    // 2. 추적자 등장 시도
+    // 1. 추적자 등장 시간이 됐으면 먼저 (복도 귀신이 계속 자리를 차지해 못 나오는 일 방지)
     this.followerTimer -= dt;
     if (!this.active && this.cooldown <= 0 && this.followerTimer <= 0) {
       this.followerTimer = 1;
       this.spawnFollower(12);
     }
+
+    // 2. 활성 귀신이 없으면 하나 준비
+    if (!this.active && this.cooldown <= 0) this.tryActivate();
 
     // 3. 활성 귀신 행동
     const h = this.active;
@@ -477,9 +524,12 @@ export class Haunts {
       if (h.unseenTime > 0.3) h.seenTime = 0;
     }
 
-    // 너무 멀어지면 내려놓음 (나중에 다시 나타날 수 있음)
-    if (h.kind !== 'follower' && dist > DEACTIVATE_DIST) {
+    // 너무 멀어지거나, 오랫동안 플레이어가 그쪽을 보지 않으면 내려놓음 (나중에 다시 나타날 수 있음).
+    // 옆 복도에 활성화된 채 방치되면 다른 귀신이 전혀 나오지 못하기 때문.
+    if (h.kind !== 'follower' && (dist > DEACTIVATE_DIST || (!h.everSeen && h.unseenTime > UNSEEN_RELEASE_SEC))) {
       this.release(h);
+      h.unseenTime = 0;
+      this.cooldown = Math.max(this.cooldown, 3);
       return;
     }
 
@@ -689,6 +739,7 @@ export class Haunts {
 
   private updateFollower(h: Haunt, dt: number, seen: boolean, _isMoving: boolean): void {
     const g = h.ghost!;
+    h.moved += dt; // 추적자는 moved를 살아 있는 시간으로 씀 (보든 안 보든)
     // 볼 때마다 다음 거리 단계로 (점점 가까이)
     const trail = [9, 5, 2.6, 1.3];
     const behind = this.playerS() - this.followerS;
@@ -713,7 +764,8 @@ export class Haunts {
     this.followerWasSeen = false;
     g.freeze = false;
     // 너무 멀어지면 놓침
-    if (behind > 30) {
+    // 너무 멀어지거나, 오랫동안 돌아보지 않으면 포기 (붙은 채로 다른 귀신을 계속 막지 않게)
+    if (behind > 30 || h.unseenTime > FOLLOWER_GIVEUP_SEC || h.moved > FOLLOWER_MAX_SEC) {
       this.finish(h, 10);
       this.followerTimer = rand(60, 100);
       return;
@@ -731,6 +783,12 @@ export class Haunts {
       }
     } else {
       g.setReversed(false);
+      // 등 뒤에 붙어 서 있는 동안 가끔 발소리 → 돌아보게 만드는 단서
+      h.soundTimer -= dt;
+      if (h.soundTimer <= 0) {
+        h.soundTimer = rand(3, 6);
+        this.sound.playFootstep(true, { x: g.root.position.x, y: 0.1, z: g.root.position.z });
+      }
     }
     const p = this.pointAt(this.followerS);
     g.root.position.set(p.x, 0, p.z);

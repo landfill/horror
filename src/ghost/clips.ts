@@ -146,6 +146,11 @@ export const GHOST_CLIPS: GhostClip[] = [
   },
 ];
 
+/** 임시 영상이 아닌 실제 영상이 있는 역할인지 */
+export function hasRealClip(role: GhostRole): boolean {
+  return GHOST_CLIPS.some((c) => !c.placeholder && c.roles.includes(role));
+}
+
 export function clipForRole(role: GhostRole): GhostClip | undefined {
   // 실제 촬영본이 있으면 임시 영상보다 우선
   const candidates = GHOST_CLIPS.filter((c) => c.roles.includes(role));
