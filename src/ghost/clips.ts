@@ -39,6 +39,32 @@ export interface GhostClip {
 
 export const GHOST_CLIPS: GhostClip[] = [
   {
+    // Flow(Veo) 생성본. 카메라 쪽으로 걸어오는 영상이라 역재생본 없이 그대로 사용.
+    // 원본: ghost-raw/approach_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/approach_test_720p.mp4 approach --cover 90x90 --height 1280 --fps 24 --loopfade 1.2
+    id: 'approach',
+    src: '/ghosts/approach.mp4',
+    aspect: 0.5594,
+    // 인물이 프레임 높이의 약 86%를 차지 → 키 약 1.65m로 보이게
+    frameHeightM: 1.92,
+    footV: 0.07,
+    roles: ['approach'],
+    stepFps: 12,
+  },
+  {
+    // Flow(Veo) 생성본. 원본: ghost-raw/crawling_test_720p.mp4
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/crawling_test_720p.mp4 crawling --cover 90x90 --height 1280 --fps 24 --loopfade 1.2
+    id: 'crawling',
+    src: '/ghosts/crawling.mp4',
+    aspect: 0.5594,
+    // 웅크린 인물(약 0.9m)이 프레임의 약 62%를 차지
+    frameHeightM: 1.5,
+    // 손·무릎이 바닥에 닿는 높이 (프레임 아래에서 약 17%)
+    footV: 0.17,
+    roles: ['crawling'],
+    stepFps: 12,
+  },
+  {
     // Flow(Veo) 생성본. 원본: ghost-raw/standing_test_720p.mp4
     // 변환: scripts/make-ghost-clip.sh ghost-raw/standing_test_720p.mp4 standing --cover 90x90 --height 1280 --fps 24
     id: 'standing',

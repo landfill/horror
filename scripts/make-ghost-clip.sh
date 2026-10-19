@@ -20,6 +20,8 @@
 #   --intra             모든 프레임을 키프레임으로 인코딩 (프레임 탐색/역방향 스텝용, 파일 커짐)
 #   --reverse           역재생 버전(<출력이름>_rev.mp4)도 함께 생성
 #   --start S --dur D   입력에서 S초부터 D초만 사용
+#   --loopfade S        끝 S초를 처음과 겹쳐 서서히 넘어가게 함 (영상 안에서 귀신이 이동해
+#                       반복할 때 위치가 튀는 경우. 결과는 S초 짧아짐. 예: 1.2)
 #   --out DIR           출력 폴더 (기본 public/ghosts)
 #
 # 예시:
@@ -28,13 +30,13 @@
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-  sed -n '2,30p' "$0"
+  sed -n '2,32p' "$0"
   exit 1
 fi
 
 IN="$1"; NAME="$2"; shift 2
 KEY=green; KEYER=diff; LO=25; HI=70; SIM=""; BLEND=0.06; COLOR=""; COVER=""; HEIGHT=960; FPS=30; INTRA=0; REVERSE=0
-START=""; DUR=""; OUT=public/ghosts
+START=""; DUR=""; OUT=public/ghosts; LOOPFADE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,6 +54,7 @@ while [ $# -gt 0 ]; do
     --reverse) REVERSE=1; shift ;;
     --start) START="$2"; shift 2 ;;
     --dur) DUR="$2"; shift 2 ;;
+    --loopfade) LOOPFADE="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
   esac
@@ -91,6 +94,14 @@ if [ -n "$COVER" ]; then
   CW="${COVER%x*}"; CH="${COVER#*x}"
   FILL="$([ "$KEY" = green ] && echo 0x00FF00 || echo "${COLOR:-0x000000}")"
   PRE="drawbox=x=iw-${CW}:y=ih-${CH}:w=${CW}:h=${CH}:color=${FILL}:t=fill,${PRE}"
+fi
+
+# 반복 이음매: [S, 끝] 구간 뒤에 [0, S] 구간을 S초 동안 겹쳐 녹임 → 마지막 프레임이 첫 프레임으로 자연스럽게 이어짐
+if [ -n "$LOOPFADE" ]; then
+  D="${DUR:-$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$IN")}"
+  [ -n "$START" ] && [ -z "$DUR" ] && D=$(awk "BEGIN { print $D - $START }")
+  OFF=$(awk "BEGIN { print $D - 2 * $LOOPFADE }")
+  PRE="fps=${FPS},split[lx][ly];[lx]trim=start=${LOOPFADE},setpts=PTS-STARTPTS[la];[ly]trim=end=${LOOPFADE},setpts=PTS-STARTPTS[lb];[la][lb]xfade=transition=fade:duration=${LOOPFADE}:offset=${OFF},${PRE}"
 fi
 
 BASE="${PRE}scale=-2:${HEIGHT}:flags=lanczos,fps=${FPS},format=rgba,${KEYF},premultiply=inplace=1,format=rgba"
