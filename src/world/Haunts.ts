@@ -39,8 +39,8 @@ const DEBUG = params.get('debug') === 'ghosts';
 /** ?debug=ghosts&haunt=ceiling : 한 종류만 강제 */
 const FORCE = (params.get('haunt') as HauntKind | null) ?? null;
 
-const ACTIVATE_DIST = 24; // 이 거리 안에 들어오면 (안 보일 때) 나타날 준비
-const DEACTIVATE_DIST = 34;
+const ACTIVATE_DIST = 34; // 이 거리 안에 들어오면 (안 보일 때) 나타날 준비. 안개 너머(약 22m 이상)면 정면이어도 준비 가능
+const DEACTIVATE_DIST = 40;
 const SEE_DIST = 22;
 const SEE_COS = 0.72; // 시야 중심에서 약 44도 안쪽
 
@@ -74,26 +74,26 @@ function pickWeighted(kinds: HauntKind[]): HauntKind | null {
 }
 
 /** 활성화된 뒤 이 시간 동안 한 번도 안 보이면 내려놓고 다른 귀신에게 차례를 넘김 */
-const UNSEEN_RELEASE_SEC = 15;
+const UNSEEN_RELEASE_SEC = 8;
 /** 따라오는 귀신이 이 시간 동안 한 번도 안 보이면 포기하고 사라짐 */
-const FOLLOWER_GIVEUP_SEC = 35;
+const FOLLOWER_GIVEUP_SEC = 30;
 /** 따라오는 귀신은 최대 이 시간까지만 (다른 귀신에게도 차례가 가도록) */
 const FOLLOWER_MAX_SEC = 45;
 
 // 출현 빈도 (값을 바꾸면 전체 빈도가 조절됨)
 /** 복도 하나에 귀신이 배치될 확률 */
-const CORRIDOR_SPAWN_P = 0.6;
+const CORRIDOR_SPAWN_P = 1.0;
 /** 교차로 하나에 모퉁이 엿보기가 배치될 확률 */
-const JUNCTION_PEEK_P = 0.24;
+const JUNCTION_PEEK_P = 0.45;
 /** 귀신이 끝난 뒤 다음 귀신까지 쉬는 시간(초): 마주침 / 조용히 사라짐 / 다가가자 사라짐 / 추적자 포기 */
-const REST_AFTER_JOLT = 17;
-const REST_AFTER_VANISH = 10;
-const REST_AFTER_NEAR = 12;
-const REST_AFTER_GIVEUP = 5;
+const REST_AFTER_JOLT = 6;
+const REST_AFTER_VANISH = 3;
+const REST_AFTER_NEAR = 4;
+const REST_AFTER_GIVEUP = 0;
 /** 추적자 등장 간격(초): 처음 / 마주친 뒤 / 포기한 뒤 */
-const FOLLOWER_FIRST: [number, number] = [30, 50];
-const FOLLOWER_AFTER_JOLT: [number, number] = [45, 75];
-const FOLLOWER_AFTER_GIVEUP: [number, number] = [30, 50];
+const FOLLOWER_FIRST: [number, number] = [15, 25];
+const FOLLOWER_AFTER_JOLT: [number, number] = [25, 40];
+const FOLLOWER_AFTER_GIVEUP: [number, number] = [15, 25];
 
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
@@ -148,7 +148,7 @@ export class Haunts {
   private haunts: Haunt[] = [];
   private active: Haunt | null = null;
   private nextId = 1;
-  private cooldown = DEBUG ? 0 : 10;
+  private cooldown = DEBUG ? 0 : 5;
 
   // 추적자(follower): 플레이어가 지나온 길을 그대로 따라옴
   private crumbs: Crumb[] = [];
@@ -177,7 +177,7 @@ export class Haunts {
   private nearStart(key: string): boolean {
     const m = key.match(/(-?\d+),(-?\d+)/);
     if (!m) return false;
-    return Math.abs(Number(m[1])) + Math.abs(Number(m[2])) <= 1;
+    return Math.abs(Number(m[1])) + Math.abs(Number(m[2])) === 0;
   }
 
   public onCorridorBuilt(cell: string, zone: ZoneKind, frame: CorridorFrame, _group: THREE.Group): void {
@@ -296,7 +296,8 @@ export class Haunts {
   private finish(h: Haunt, rest = 25): void {
     h.done = true;
     this.release(h);
-    this.cooldown = DEBUG ? 2 : rest;
+    // 추적자는 자기 등장 간격(followerTimer)으로 따로 관리
+    if (h.kind !== 'follower') this.cooldown = DEBUG ? 2 : rest;
   }
 
   /** 마주침: 불이 나가고 화면이 찢기며 사라짐 */
@@ -329,9 +330,13 @@ export class Haunts {
     const i = Number(m[1]);
     const j = Number(m[2]);
     if (h.kind === 'peek') return Math.abs(i - p.i) + Math.abs(j - p.j) <= 1;
+    // 플레이어가 바라보는 방향의 다음 교차로도 포함 (그 너머 복도에서 안개 속으로 나타나게)
+    const f = this.camFwd;
+    const ahead = Math.abs(f.x) > Math.abs(f.z) ? { i: p.i + Math.sign(f.x), j: p.j } : { i: p.i, j: p.j + Math.sign(f.z) };
+    const near = (a: number, b: number) => (a === p.i && b === p.j) || (a === ahead.i && b === ahead.j);
     // 복도 (i,j)-N 은 (i,j)~(i,j-1), (i,j)-E 는 (i,j)~(i+1,j)
     const [bi, bj] = m[3] === 'N' ? [i, j - 1] : [i + 1, j];
-    return (i === p.i && j === p.j) || (bi === p.i && bj === p.j);
+    return near(i, j) || near(bi, bj);
   }
 
   private tryActivate(): void {
@@ -512,19 +517,24 @@ export class Haunts {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recordCrumb(playerPos);
 
-    // 1. 추적자 등장 시간이 됐으면 먼저 (복도 귀신이 계속 자리를 차지해 못 나오는 일 방지)
+    // 귀신 자리는 두 개: 등 뒤의 추적자 하나 + 앞쪽 복도·모퉁이 귀신 하나 (서로 막지 않음)
+    // 1. 추적자
     this.followerTimer -= dt;
-    if (!this.active && this.cooldown <= 0 && this.followerTimer <= 0) {
+    if (!this.follower && this.followerTimer <= 0) {
       this.followerTimer = 1;
       this.spawnFollower(12);
     }
 
-    // 2. 활성 귀신이 없으면 하나 준비
+    // 2. 복도·모퉁이 귀신
     if (!this.active && this.cooldown <= 0) this.tryActivate();
 
-    // 3. 활성 귀신 행동
-    const h = this.active;
-    if (!h || !h.ghost) return;
+    // 3. 행동
+    if (this.active) this.step(this.active, dt, elapsed, isMoving);
+    if (this.follower) this.step(this.follower, dt, elapsed, isMoving);
+  }
+
+  private step(h: Haunt, dt: number, elapsed: number, isMoving: boolean): void {
+    if (!h.ghost) return;
 
     const c = this.center(h);
     const dist = this.flatDist(c);
@@ -749,7 +759,6 @@ export class Haunts {
     this.followerStage = 0;
     this.followerWasSeen = false;
     this.follower = h;
-    this.active = h;
   }
 
   private updateFollower(h: Haunt, dt: number, seen: boolean, _isMoving: boolean): void {
@@ -811,7 +820,7 @@ export class Haunts {
 
   /** 디버그: 현재 상태 */
   public debugState(): object {
-    const h = this.active;
+    const h = this.active ?? this.follower;
     return {
       active: h ? { kind: h.kind, dir: h.frame?.dir, lz: +h.lz.toFixed(2), side: h.side, zone: h.zone, seenTime: +h.seenTime.toFixed(2), everSeen: h.everSeen, pos: h.ghost?.root.position.toArray().map((v) => +v.toFixed(2)) } : null,
       followerBehind: this.follower ? +(this.playerS() - this.followerS).toFixed(2) : null,
