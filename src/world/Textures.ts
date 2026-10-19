@@ -30,7 +30,7 @@ export function makeCanvasTexture(w: number, h: number, draw: Draw, repeat = tru
     t.wrapS = THREE.RepeatWrapping;
     t.wrapT = THREE.RepeatWrapping;
   }
-  t.magFilter = THREE.NearestFilter;
+  t.magFilter = THREE.LinearFilter;
   return t;
 }
 

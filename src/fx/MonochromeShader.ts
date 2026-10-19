@@ -2,17 +2,18 @@
  * 화면 전체를 흑백으로 만드는 후처리 셰이더.
  * - 완전한 그레이스케일 (색 정보 제거)
  * - 감마 공간에서 고대비 처리 → 어둠은 더 검게, 형광등은 더 희게
- * - 필름 그레인, 비네팅, 스캔라인
- * - 드물게 가로로 찢어지는 VHS 트래킹 노이즈 (uDistort로 순간 강화)
+ * - 필름 그레인, 비네팅
+ * - 스캔라인과 가로 찢김은 평소에는 없고, 이벤트 순간(uDistort)에만 나타남
+ *   (항상 켜져 있으면 '필터를 씌운 게임'처럼 보이고 금방 무뎌짐)
  */
 export const MonochromeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uGrain: { value: 0.12 },
-    uContrast: { value: 1.45 },
+    uGrain: { value: 0.09 },
+    uContrast: { value: 1.2 },
     uBrightness: { value: 1.0 },
-    uVignette: { value: 1.25 },
+    uVignette: { value: 0.8 },
     uDistort: { value: 0.0 },
     uTear: { value: 1.0 },
   },
@@ -41,9 +42,10 @@ export const MonochromeShader = {
     void main() {
       vec2 uv = vUv;
 
-      // 드문 가로 찢김 + 이벤트 시 화면 일그러짐
+      // 이벤트 순간에만 가로 찢김 + 화면 일그러짐
+      float fx = clamp(uDistort * 4.0, 0.0, 1.0);
       float band = floor(uv.y * 160.0);
-      float tear = step(0.997, hash(vec2(band, floor(uTime * 20.0)))) * uTear;
+      float tear = step(0.985, hash(vec2(band, floor(uTime * 20.0)))) * uTear * fx;
       float wob = (hash(vec2(floor(uv.y * 70.0), floor(uTime * 30.0))) - 0.5) * uDistort;
       uv.x += tear * 0.012 + wob * 0.05;
 
@@ -52,7 +54,8 @@ export const MonochromeShader = {
 
       // 감마 공간에서 대비 조정
       l = pow(max(l, 0.0), 1.0 / 2.2);
-      l = (l - 0.42) * uContrast + 0.42;
+      // 기준점을 낮춰 어두운 영역이 통째로 검게 뭉개지지 않게 함
+      l = (l - 0.28) * uContrast + 0.28;
       l *= uBrightness;
 
       // 비네팅
@@ -64,8 +67,8 @@ export const MonochromeShader = {
       float g = hash(vUv * vec2(913.0, 677.0) + fract(uTime * 13.0) * 91.0) - 0.5;
       l += g * uGrain;
 
-      // 스캔라인
-      l *= 0.93 + 0.07 * step(1.0, mod(gl_FragCoord.y, 2.0));
+      // 스캔라인 (이벤트 순간에만)
+      l *= 1.0 - fx * 0.08 * step(1.0, mod(gl_FragCoord.y, 2.0));
 
       l = clamp(l, 0.0, 1.0);
       // OutputPass가 다시 sRGB로 인코딩하므로 선형으로 되돌림

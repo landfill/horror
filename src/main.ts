@@ -7,6 +7,7 @@ import { SoundManager } from './audio/SoundManager';
 import { FirstPersonControls } from './input/FirstPersonControls';
 import { MonochromeShader } from './fx/MonochromeShader';
 import { EndlessWorld } from './world/EndlessWorld';
+import { VideoClipPool } from './ghost/VideoClipPool';
 
 /**
  * 게임적 목표(점수, 수칙, 엘리베이터 이동, 클리어)를 완전히 배제하고,
@@ -22,9 +23,11 @@ class InescapableHorrorApp {
   private sound: SoundManager;
   private controls: FirstPersonControls;
   private world: EndlessWorld;
+  private ghostClips: VideoClipPool;
 
   private isPaused = true;
-  private showSubtitles = true;
+  // 자막은 기본 꺼짐 (청각 접근성용 옵션으로만 제공)
+  private showSubtitles = false;
   private stepDistanceAccum = 0;
   private elapsed = 0;
   private lastTime = performance.now();
@@ -39,7 +42,7 @@ class InescapableHorrorApp {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x020202);
     // 짙은 흑백 안개로 먼 복도 끝을 암흑 속에 묻음
-    this.scene.fog = new THREE.FogExp2(0x020202, 0.135);
+    this.scene.fog = new THREE.FogExp2(0x020202, 0.075);
 
     this.camera = new THREE.PerspectiveCamera(
       64,
@@ -47,7 +50,8 @@ class InescapableHorrorApp {
       0.08,
       36
     );
-    this.camera.position.set(0, 1.62, -1.5);
+    // 시작은 교차로 한가운데: 처음부터 갈림길이 보이게
+    this.camera.position.set(0, 1.62, 0);
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: false,
@@ -56,11 +60,11 @@ class InescapableHorrorApp {
     container.appendChild(this.renderer.domElement);
 
     // 극도로 어두운 주변광 (형광등 불빛 밖은 거의 칠흑)
-    const ambient = new THREE.AmbientLight(0x262626, 0.42);
+    const ambient = new THREE.AmbientLight(0x6a6a6a, 0.55);
     this.scene.add(ambient);
 
     // 플레이어 시야 앞을 아주 희미하게 비추는 잔광 (완전 암전 시에도 코앞 실루엣만 어렴풋이 보이도록)
-    const eyeLight = new THREE.PointLight(0xffffff, 0.22, 4.2, 2.0);
+    const eyeLight = new THREE.PointLight(0xffffff, 0.6, 5.0, 2.0);
     this.camera.add(eyeLight);
     this.scene.add(this.camera);
 
@@ -87,9 +91,13 @@ class InescapableHorrorApp {
     );
     this.controls.enabled = false;
 
-    this.world = new EndlessWorld(this.scene, this.sound, (whisper) => {
-      this.displaySubtitle(whisper);
-    });
+    this.ghostClips = new VideoClipPool();
+    this.world = new EndlessWorld(this.scene, this.sound, this.ghostClips);
+    if (new URLSearchParams(location.search).get('debug')) {
+      const w = window as unknown as Record<string, unknown>;
+      w.__ghostClips = this.ghostClips;
+      w.__app = this;
+    }
 
     this.bindUI();
     this.setupTabTitleDread();
@@ -99,7 +107,7 @@ class InescapableHorrorApp {
   }
 
   private updateRendererSize(): void {
-    const scale = window.innerWidth < 768 ? 0.58 : 0.68;
+    const scale = window.innerWidth < 768 ? 0.75 : 0.9;
     const w = Math.max(1, Math.floor(window.innerWidth * scale));
     const h = Math.max(1, Math.floor(window.innerHeight * scale));
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -132,10 +140,11 @@ class InescapableHorrorApp {
       this.showSubtitles = optSubtitles.checked;
       pauseSubtitles.checked = this.showSubtitles;
       this.sound.init();
+      // iOS 등에서 영상 재생을 허용받으려면 사용자 클릭 안에서 한 번 재생해야 함
+      this.ghostClips.unlock();
       startScreen.classList.remove('active');
       this.hudEl.classList.remove('hidden');
       this.resume();
-      this.displaySubtitle('[4시 44분… 복도는 끝없이 다른 층으로 이어져 있다]');
     });
 
     document.getElementById('btn-pause')!.addEventListener('click', () => {
@@ -154,10 +163,12 @@ class InescapableHorrorApp {
       this.controls.enabled = false;
       this.controls.unlockPointer();
       this.sound.pauseAll(true);
+      this.ghostClips.pauseAll(true);
       modal.classList.add('active');
     } else {
       modal.classList.remove('active');
       this.sound.pauseAll(false);
+      this.ghostClips.pauseAll(false);
       this.resume();
     }
   }
@@ -190,7 +201,7 @@ class InescapableHorrorApp {
       } else {
         document.title = '04:44 — 출구 없음';
         if (!this.isPaused) {
-          this.sound.playCreak(undefined, '[등 뒤에서 문이 닫히는 소리…]');
+          this.sound.playCreak(undefined, '[문 닫히는 소리]');
         }
       }
     });
@@ -204,6 +215,7 @@ class InescapableHorrorApp {
     this.elapsed += dt;
 
     if (!this.isPaused) {
+      this.controls.update(dt);
       // 무겁고 느린 보행 속도 (게임처럼 빠르게 뛰어다닐 수 없음)
       const speed = this.controls.isRunning ? 2.45 : 1.85;
       const yaw = this.controls.getYaw();
@@ -239,6 +251,7 @@ class InescapableHorrorApp {
       }
 
       this.sound.updateListener(this.camera);
+      this.ghostClips.tick(dt);
 
       const camForward = this.controls.getForwardVector();
       this.world.update(

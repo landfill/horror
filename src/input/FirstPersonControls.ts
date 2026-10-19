@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 
 /**
- * 데스크톱(WASD + 마우스 PointerLock) 및 모바일(왼쪽 가상 조이스틱 + 오른쪽 스와이프 시점) 통합 입력 컨트롤러
+ * 데스크톱 + 모바일 통합 입력.
+ * - ↑↓ / W S : 전진·후진
+ * - ←→ : 제자리에서 방향 전환
+ * - A D : 옆걸음
+ * - 마우스 : 시점 (화면 클릭 시 포인터 고정, 고정이 안 되면 드래그로 회전)
+ * - 모바일 : 왼쪽 조이스틱 이동, 오른쪽 스와이프 시점
  */
 export class FirstPersonControls {
   private camera: THREE.PerspectiveCamera;
@@ -9,6 +14,8 @@ export class FirstPersonControls {
 
   public moveForward = 0; // -1 (뒤) ~ +1 (앞)
   public moveRight = 0;   // -1 (좌) ~ +1 (우)
+  /** 방향 전환 입력 -1 (왼쪽) ~ +1 (오른쪽) */
+  public turn = 0;
   public isRunning = false;
   public enabled = true;
 
@@ -16,6 +23,7 @@ export class FirstPersonControls {
   private pitch = 0;
   private keys: Record<string, boolean> = {};
   private isPointerLocked = false;
+  private dragging = false;
 
   // Mobile joystick & touch look state
   private joystickTouchId: number | null = null;
@@ -89,6 +97,8 @@ export class FirstPersonControls {
 
   private bindKeyboard(): void {
     window.addEventListener('keydown', (e) => {
+      // 화살표 키가 페이지를 스크롤하지 않게
+      if (e.code.startsWith('Arrow')) e.preventDefault();
       if (!this.enabled) {
         if (e.code === 'Escape' && this.onPauseCallback) {
           this.onPauseCallback();
@@ -110,6 +120,12 @@ export class FirstPersonControls {
       this.keys[e.code] = false;
       this.updateKeyboardMove();
     });
+
+    // 창이 포커스를 잃으면 눌린 키를 모두 해제 (키가 눌린 채로 계속 걷는 문제 방지)
+    window.addEventListener('blur', () => {
+      this.keys = {};
+      this.updateKeyboardMove();
+    });
   }
 
   private updateKeyboardMove(): void {
@@ -117,11 +133,12 @@ export class FirstPersonControls {
 
     const f = (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) -
               (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
-    const r = (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0) -
-              (this.keys['KeyA'] || this.keys['ArrowLeft'] ? 1 : 0);
+    const r = (this.keys['KeyD'] ? 1 : 0) - (this.keys['KeyA'] ? 1 : 0);
+    const t = (this.keys['ArrowRight'] ? 1 : 0) - (this.keys['ArrowLeft'] ? 1 : 0);
 
     this.moveForward = f;
     this.moveRight = r;
+    this.turn = t;
     this.isRunning = Boolean(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
   }
 
@@ -130,8 +147,10 @@ export class FirstPersonControls {
       this.isPointerLocked = document.pointerLockElement === this.domElement;
     });
 
-    this.domElement.addEventListener('click', () => {
+    // 화면 어디를 클릭해도 포인터 고정 (버튼 등 UI 클릭은 제외)
+    window.addEventListener('click', (e) => {
       if (!this.enabled) return;
+      if ((e.target as HTMLElement).closest('button, input, label, .modal-screen')) return;
       if (!this.isPointerLocked && !('ontouchstart' in window)) {
         this.lockPointer();
       } else {
@@ -139,8 +158,16 @@ export class FirstPersonControls {
       }
     });
 
+    // 포인터 고정이 거부된 환경에서도 시점을 돌릴 수 있게 드래그 지원
+    window.addEventListener('mousedown', (e) => {
+      if (e.button === 0) this.dragging = true;
+    });
+    window.addEventListener('mouseup', () => {
+      this.dragging = false;
+    });
+
     window.addEventListener('mousemove', (e) => {
-      if (!this.enabled || !this.isPointerLocked) return;
+      if (!this.enabled || (!this.isPointerLocked && !this.dragging)) return;
       const sensitivity = 0.0022;
       this.yaw -= e.movementX * sensitivity;
       this.pitch -= e.movementY * sensitivity;
@@ -148,6 +175,14 @@ export class FirstPersonControls {
       this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
       this.applyCameraRotation();
     });
+  }
+
+  /** 매 프레임: 화살표 키 방향 전환 */
+  public update(dt: number): void {
+    if (!this.enabled || this.turn === 0) return;
+    const turnSpeed = 1.9; // rad/s
+    this.yaw -= this.turn * turnSpeed * dt;
+    this.applyCameraRotation();
   }
 
   private bindTouch(): void {

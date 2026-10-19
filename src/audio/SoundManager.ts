@@ -14,6 +14,8 @@ export interface SpatialPos {
 export class SoundManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  /** 모든 효과음이 지나가는 버스. 원음 + 공간 잔향으로 나뉨 */
+  private fxBus: GainNode | null = null;
   private ambientGain: GainNode | null = null;
   private humOsc1: OscillatorNode | null = null;
   private humOsc2: OscillatorNode | null = null;
@@ -47,6 +49,7 @@ export class SoundManager {
     this.masterGain.gain.value = 0.8;
     this.masterGain.connect(this.ctx.destination);
 
+    this.setupReverb();
     this.startAmbientHum();
   }
 
@@ -98,11 +101,50 @@ export class SoundManager {
     }
   }
 
+  /**
+   * 콘크리트 복도 잔향. 실제 녹음된 공간 응답(IR)이 없으므로
+   * 감쇠하는 노이즈로 IR을 만들어 씁니다. 나중에 실제 복도에서 녹음한 IR로 교체 가능.
+   */
+  private setupReverb(): void {
+    if (!this.ctx || !this.masterGain) return;
+    const ctx = this.ctx;
+    const seconds = 2.6;
+    const len = Math.floor(ctx.sampleRate * seconds);
+    const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        const t = i / len;
+        // 앞부분은 비워 두어(약 12ms) 벽에서 돌아오는 느낌을 줌
+        const pre = i < ctx.sampleRate * 0.012 ? 0 : 1;
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 3.2) * pre;
+      }
+    }
+    const convolver = ctx.createConvolver();
+    convolver.buffer = ir;
+
+    // 잔향은 고음을 깎아 어둡게
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass';
+    damp.frequency.value = 3200;
+
+    const wet = ctx.createGain();
+    wet.gain.value = 0.45;
+
+    this.fxBus = ctx.createGain();
+    this.fxBus.connect(this.masterGain);
+    this.fxBus.connect(damp);
+    damp.connect(convolver);
+    convolver.connect(wet);
+    wet.connect(this.masterGain);
+  }
+
   private createPanner(pos?: SpatialPos): AudioNode {
     if (!this.ctx || !this.masterGain) {
       throw new Error('SoundManager not initialized');
     }
-    if (!pos) return this.masterGain;
+    const bus = this.fxBus ?? this.masterGain;
+    if (!pos) return bus;
 
     const panner = this.ctx.createPanner();
     panner.panningModel = 'HRTF';
@@ -113,7 +155,7 @@ export class SoundManager {
     panner.positionX.setValueAtTime(pos.x, this.ctx.currentTime);
     panner.positionY.setValueAtTime(pos.y, this.ctx.currentTime);
     panner.positionZ.setValueAtTime(pos.z, this.ctx.currentTime);
-    panner.connect(this.masterGain);
+    panner.connect(bus);
     return panner;
   }
 
@@ -161,9 +203,7 @@ export class SoundManager {
     this.isHumCut = cut;
     const target = cut ? 0.0001 : 0.08;
     this.ambientGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.04);
-    if (cut) {
-      this.emitSubtitle('[형광등 웅웅거림이 갑자기 멈췄다…]');
-    }
+    // 정적은 자막으로 알리지 않음 (설명하는 순간 정적의 효과가 사라짐)
   }
 
   /**
@@ -203,7 +243,7 @@ export class SoundManager {
   /**
    * 끼익거리는 소리 (문, 의자 끌기, 녹슨 경첩)
    */
-  public playCreak(pos?: SpatialPos, label = '[어딘가에서 문이 끼익거리는 소리]'): void {
+  public playCreak(pos?: SpatialPos, label = '[문이 끼익거림]'): void {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
@@ -253,7 +293,7 @@ export class SoundManager {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
-    this.emitSubtitle('[목 깊은 곳에서 딸깍… 딸깍… 긁히는 소리]');
+    this.emitSubtitle('[목에서 긁히는 소리]');
 
     const clicks = 14;
     for (let i = 0; i < clicks; i++) {
@@ -281,7 +321,7 @@ export class SoundManager {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
-    this.emitSubtitle('[교실 안에서 칠판을 손톱으로 길게 긁는 소리]');
+    this.emitSubtitle('[긁는 소리]');
 
     const dur = 1.1;
     const bufferSize = Math.floor(this.ctx.sampleRate * dur);
@@ -314,7 +354,7 @@ export class SoundManager {
   /**
    * 기분 나쁜 속삭임 / 여자 콧노래 / 왜곡된 부름
    */
-  public playEerieHumOrWhisper(pos?: SpatialPos, label = '[뒤편에서 낮게 흥얼거리는 소리…]', reversed = false): void {
+  public playEerieHumOrWhisper(pos?: SpatialPos, label = '[낮은 흥얼거림]', reversed = false): void {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
@@ -357,7 +397,7 @@ export class SoundManager {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
-    this.emitSubtitle('[방울이 잘그랑거린다]');
+    this.emitSubtitle('[방울 소리]');
 
     const freqs = [1760, 2349, 3135, 4186];
     freqs.forEach((f, i) => {
@@ -411,7 +451,7 @@ export class SoundManager {
   public playScream(): void {
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const now = this.ctx.currentTime;
-    this.emitSubtitle('[귀를 찢는 비명!]');
+    this.emitSubtitle('[비명]');
 
     const dur = 1.15;
     const freqs = [587, 830, 1174, 1567];

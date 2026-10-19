@@ -283,8 +283,9 @@ html, body {
   touch-action: none;
 }
 
+/* 마우스 환경에서는 터치 조작 영역을 숨김 (클릭이 게임 화면에 전달되도록) */
 @media (hover: hover) and (pointer: fine) {
-  .joystick-zone {
-    opacity: 0.18;
+  .mobile-controls {
+    display: none;
   }
 }
