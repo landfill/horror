@@ -93,7 +93,10 @@ class InescapableHorrorApp {
       this.camera,
       this.renderer.domElement,
       {
-        onPause: () => this.togglePause(true),
+        // 첫 화면에서는 ESC로 일시정지 창이 뜨지 않게
+        onPause: () => {
+          if (!this.onTitle) this.togglePause(true);
+        },
       }
     );
     this.controls.enabled = false;
