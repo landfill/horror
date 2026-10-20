@@ -1,6 +1,18 @@
 import * as THREE from 'three';
-import { Mat, rand } from './Textures';
+import { Mat, VARIANT_COUNT, pick, rand, variantOf } from './Textures';
 import { DIRS, Dir, DOOR_WALL_Z, HALF, SEG_H, SEG_LEN, SEG_W, ZoneKind, edgeOpen } from './Maze';
+import {
+  DoorUnit,
+  LANDMARK_KINDS,
+  PropKind,
+  makeCeilingHole,
+  makeProp,
+  makeSlidingCloset,
+  makeStain,
+  makeSwingDoor,
+  makeTV,
+} from './Props';
+import type { SpotSpec } from './Anomalies';
 
 /** 로컬 좌표의 형광등 위치와 세기 */
 export interface FixtureSpec {
@@ -9,7 +21,26 @@ export interface FixtureSpec {
   z: number;
   base: number;
   mat: THREE.MeshBasicMaterial;
+  /** 처음부터 꺼져 있는 등 */
+  dead?: boolean;
 }
+
+export interface BuiltPiece {
+  group: THREE.Group;
+  fixtures: FixtureSpec[];
+  /** 이상 현상이 일어날 수 있는 자리 (로컬 좌표) */
+  spots: SpotSpec[];
+}
+
+/**
+ * 복도 변주 원칙
+ * - 모든 변주는 조각을 만들 때 한 번만 정합니다. 조각은 안개 너머(또는 시야 밖)에서 만들어지므로
+ *   플레이어가 보는 동안 모양이 바뀌지 않습니다.
+ * - 소품은 벽에 붙여(벽에서 0.5m 이내) 놓아 걷는 길(가운데 약 2.5m)과 문틀 통로를 막지 않습니다.
+ * - 재질은 캐시된 공유 재질과 소수의 변형(variantOf)만 씁니다.
+ */
+const WALL_PROP_X = HALF - 0.32; // 벽에 붙여 놓는 바닥 소품의 x
+const KEEP_CLEAR_Z = -SEG_LEN + 1.6; // 이보다 깊은 곳(문틀 앞)에는 바닥 소품을 두지 않음
 
 function wallMatFor(zone: ZoneKind): THREE.Material {
   return zone === 'school'
@@ -37,90 +68,226 @@ function ceilMatFor(zone: ZoneKind): THREE.Material {
   return zone === 'tatami' ? Mat.darkWood() : Mat.ceilingTile();
 }
 
-function addFixture(group: THREE.Group, out: FixtureSpec[], x: number, z: number, base: number): void {
-  const mat = new THREE.MeshBasicMaterial({ color: 0xd8d8d2 });
+function doorMatFor(zone: ZoneKind): THREE.Material {
+  return zone === 'apt404' || zone === 'subway' ? Mat.steelDoor() : Mat.woodDoor();
+}
+
+const variant = () => Math.floor(Math.random() * VARIANT_COUNT);
+
+function addFixture(group: THREE.Group, out: FixtureSpec[], x: number, z: number, base: number, dead = false, hanging = false): void {
+  const mat = new THREE.MeshBasicMaterial({ color: dead ? 0x181818 : 0xd8d8d2 });
   const tube = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.04, 0.14), mat);
-  tube.position.set(x, SEG_H - 0.03, z);
   tube.userData.fixture = true;
+  if (hanging) {
+    // 한쪽 고정이 빠져 비스듬히 매달린 등
+    tube.position.set(x, SEG_H - 0.2, z);
+    tube.rotation.z = rand(0.45, 0.6) * (Math.random() < 0.5 ? -1 : 1);
+    const wire = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.2, 0.01), Mat.darkMetal());
+    wire.position.set(x + Math.sign(tube.rotation.z) * 0.29, SEG_H - 0.1, z);
+    group.add(wire);
+  } else {
+    tube.position.set(x, SEG_H - 0.03, z);
+  }
   group.add(tube);
-  out.push({ x, y: SEG_H - 0.18, z, base, mat });
+  out.push({ x, y: SEG_H - 0.18, z, base, mat, dead });
+}
+
+/** 형광등 상태: 대부분 켜짐, 가끔 흐림·꺼짐 */
+function fixtureState(lightFull: number): { base: number; dead: boolean } {
+  const r = Math.random();
+  if (r < 0.14) return { base: lightFull, dead: true };
+  if (r < 0.4) return { base: lightFull * rand(0.3, 0.5), dead: false };
+  return { base: lightFull, dead: false };
+}
+
+/** 복도 벽(side: -1 왼쪽 / 1 오른쪽)에 로컬 평면(앞면 +z)을 붙이는 변환 */
+function onWall(obj: THREE.Object3D, side: number, z: number, inset = 0): void {
+  obj.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+  obj.position.set(side * (HALF - inset), obj.position.y, z);
+}
+
+/** 바닥 소품을 벽에 붙여 놓고 방향을 정함 (facing: 'corridor' | 'wall' | 'along') */
+function placeOnFloor(obj: THREE.Object3D, side: number, z: number, facing: 'corridor' | 'wall' | 'along' = 'corridor'): void {
+  obj.position.set(side * WALL_PROP_X, 0, z);
+  const toCorridor = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+  obj.rotation.y = facing === 'corridor' ? toCorridor : facing === 'wall' ? toCorridor + Math.PI : rand(-0.3, 0.3);
+}
+
+/** 얼룩 붙이기. walls=false면 바닥·천장에만 (교차로는 뚫린 방향에 벽이 없으므로) */
+function addStains(group: THREE.Group, count: number, length: number, z0: number, walls = true): void {
+  for (let k = 0; k < count; k++) {
+    const r = walls ? Math.random() : 0.6 + Math.random() * 0.4;
+    const s = makeStain(rand(0.6, 1.6), rand(0.6, 1.4));
+    const z = z0 - rand(0.5, length - 0.5);
+    if (r < 0.6) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      s.position.y = rand(0.8, SEG_H - 0.6);
+      onWall(s, side, z, 0.006);
+    } else if (r < 0.8) {
+      s.rotation.x = Math.PI / 2;
+      s.position.set(rand(-0.8, 0.8), SEG_H - 0.006, z);
+    } else {
+      s.rotation.x = -Math.PI / 2;
+      s.position.set(rand(-0.9, 0.9), 0.006, z);
+    }
+    group.add(s);
+  }
 }
 
 /**
  * 복도 하나 (로컬 원점 = 소유 교차로 가장자리, 로컬 -z 방향으로 18m).
  * 반환된 group은 호출 측에서 월드 위치/회전을 지정합니다.
  */
-export function buildCorridor(zone: ZoneKind, lightFull: number): { group: THREE.Group; fixtures: FixtureSpec[] } {
+export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
   const group = new THREE.Group();
   const fixtures: FixtureSpec[] = [];
+  const spots: SpotSpec[] = [];
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), floorMatFor(zone));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), variantOf(floorMatFor(zone), variant()));
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, -SEG_LEN / 2);
   group.add(floor);
 
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), ceilMatFor(zone));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), variantOf(ceilMatFor(zone), variant()));
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, SEG_H, -SEG_LEN / 2);
   group.add(ceil);
 
+  // 좌우 벽도 서로 다른 변형일 수 있음
   const wallGeo = new THREE.PlaneGeometry(SEG_LEN, SEG_H);
-  const wallMat = wallMatFor(zone);
-  const leftWall = new THREE.Mesh(wallGeo, wallMat);
+  const leftWall = new THREE.Mesh(wallGeo, variantOf(wallMatFor(zone), variant()));
   leftWall.rotation.y = Math.PI / 2;
   leftWall.position.set(-HALF, SEG_H / 2, -SEG_LEN / 2);
-  const rightWall = new THREE.Mesh(wallGeo.clone(), wallMat);
+  const rightWall = new THREE.Mesh(wallGeo.clone(), variantOf(wallMatFor(zone), variant()));
   rightWall.rotation.y = -Math.PI / 2;
   rightWall.position.set(HALF, SEG_H / 2, -SEG_LEN / 2);
   group.add(leftWall, rightWall);
 
   buildThresholdDoorway(group, DOOR_WALL_Z);
 
-  // 형광등 2개 (두 번째는 자주 흐리거나 꺼져 있음)
-  addFixture(group, fixtures, 0, -SEG_LEN * 0.28, lightFull);
-  addFixture(group, fixtures, 0, -SEG_LEN * 0.76, Math.random() < 0.75 ? lightFull * 0.45 : lightFull);
+  // 형광등 1~3개, 위치·상태가 복도마다 다름
+  const r = Math.random();
+  const count = r < 0.15 ? 1 : r < 0.75 ? 2 : 3;
+  const darkCorridor = Math.random() < 0.06;
+  for (let k = 0; k < count; k++) {
+    const z = -SEG_LEN * ((k + 0.5) / count) + rand(-1.2, 1.2);
+    const st = fixtureState(lightFull);
+    addFixture(group, fixtures, 0, z, st.base, darkCorridor || st.dead, Math.random() < 0.1);
+  }
+  // 전부 꺼진 복도는 드물게만 (6%)
+  if (!darkCorridor && fixtures.every((f) => f.dead)) {
+    fixtures[0].dead = false;
+    fixtures[0].mat.color.setHex(0xd8d8d2);
+  }
 
-  populateZoneDetails(group, zone);
-  return { group, fixtures };
+  addStains(group, Math.floor(rand(0, 4)), SEG_LEN, 0);
+  const holes = Math.random() < 0.35 ? (Math.random() < 0.3 ? 2 : 1) : 0;
+  for (let k = 0; k < holes; k++) {
+    const h = makeCeilingHole();
+    h.position.set(rand(-0.7, 0.7), 0, -rand(2, SEG_LEN - 2));
+    group.add(h);
+  }
+
+  populateZoneDetails(group, zone, spots);
+  return { group, fixtures, spots };
 }
 
 /**
  * 교차로 (월드 좌표 중심 기준 로컬). 복도가 없는 방향은 벽으로 막음.
+ * 막힌 벽에는 가끔 어디로도 이어지지 않는 문이 달려 있습니다.
  */
-export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: number): { group: THREE.Group; fixtures: FixtureSpec[] } {
+export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: number): BuiltPiece {
   const group = new THREE.Group();
   const fixtures: FixtureSpec[] = [];
+  const spots: SpotSpec[] = [];
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), floorMatFor(zone));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), variantOf(floorMatFor(zone), variant()));
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
 
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), ceilMatFor(zone));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), variantOf(ceilMatFor(zone), variant()));
   ceil.rotation.x = Math.PI / 2;
   ceil.position.y = SEG_H;
   group.add(ceil);
 
-  const wallMat = wallMatFor(zone);
+  const wallMat = variantOf(wallMatFor(zone), variant());
+  const closedDirs: Dir[] = [];
   (Object.keys(DIRS) as Dir[]).forEach((dir) => {
     if (edgeOpen(i, j, dir)) return;
+    closedDirs.push(dir);
     const w = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_H), wallMat);
     const { di, dj } = DIRS[dir];
     w.position.set(di * HALF, SEG_H / 2, dj * HALF);
     // 벽이 교차로 안쪽을 보도록 회전
     w.rotation.y = Math.atan2(-di, -dj);
     group.add(w);
+
+    // 막다른 벽의 문 (25%): 열려 있으면 그 너머는 칠흑
+    if (Math.random() < 0.25) {
+      const door = makeSwingDoor(doorMatFor(zone), Math.random() < 0.15);
+      door.group.position.set(di * (HALF - 0.005), 0, dj * (HALF - 0.005));
+      door.group.rotation.y = w.rotation.y;
+      group.add(door.group);
+      spots.push(doorSpot(door, di * (HALF - 0.5), dj * (HALF - 0.5)));
+    }
   });
 
   // 교차로 조명은 대체로 흐림. 가끔 완전히 꺼져 있는 교차로도 있음.
   const r = Math.random();
-  if (r > 0.2) addFixture(group, fixtures, 0, 0, r > 0.7 ? lightFull * 0.7 : lightFull * 0.3);
+  if (r > 0.2) addFixture(group, fixtures, 0, 0, r > 0.7 ? lightFull * 0.7 : lightFull * 0.3, false, Math.random() < 0.08);
 
-  return { group, fixtures };
+  addStains(group, Math.floor(rand(0, 2.6)), SEG_W, HALF, false);
+  if (Math.random() < 0.12) {
+    const h = makeCeilingHole();
+    h.position.set(rand(-0.6, 0.6), 0, rand(-0.6, 0.6));
+    group.add(h);
+  }
+
+  // 모퉁이: 가끔 눈에 띄는 사물(기억해 둘 만한 것) 하나, 아니면 같은 사물이 나중에 나타날 수 있는 빈자리
+  const c = HALF - 0.45;
+  const corners = [
+    [c, c],
+    [-c, c],
+    [c, -c],
+    [-c, -c],
+  ];
+  const [cx, cz] = pick(corners);
+  // 모퉁이 사물은 가장 가까운 벽(구석)을 바라봄
+  const faceCorner = Math.atan2(Math.sign(cx), Math.sign(cz));
+  if (Math.random() < 0.16) {
+    const kind = pick(LANDMARK_KINDS);
+    const prop = makeProp(kind);
+    prop.position.set(cx, 0, cz);
+    prop.rotation.y = faceCorner;
+    group.add(prop);
+    spots.push({ x: cx, z: cz, kind: 'landmark', prop: kind });
+  } else {
+    spots.push({
+      x: cx,
+      z: cz,
+      kind: 'echo',
+      apply: (kind?: PropKind) => {
+        if (!kind) return;
+        const prop = makeProp(kind);
+        prop.position.set(cx, 0, cz);
+        prop.rotation.y = faceCorner;
+        group.add(prop);
+      },
+    });
+  }
+
+  return { group, fixtures, spots };
+}
+
+function doorSpot(door: DoorUnit, x: number, z: number): SpotSpec {
+  const initial = door.isOpen();
+  return { x, z, kind: 'door', apply: () => door.setOpen(!initial) };
 }
 
 /**
  * 구간과 구간 사이를 잇는 좁은 문틀과 반쯤 열린 문짝.
  * 엘리베이터 없이 걸어갈수록 학교 → 아파트 → 여관 → 비디오가게 → 지하철 통로가 기괴하게 직결됩니다.
+ * 문짝이 달린 쪽과 열린 각도는 문틀마다 다르고, 가끔 문짝이 아예 없습니다.
  */
 export function buildThresholdDoorway(group: THREE.Group, zLocal: number): void {
   const doorOpenW = 1.35;
@@ -130,194 +297,287 @@ export function buildThresholdDoorway(group: THREE.Group, zLocal: number): void 
 
   const frameMat = Mat.darkConcrete();
 
-  const leftWall = new THREE.Mesh(
-    new THREE.BoxGeometry(sideW, SEG_H, 0.28),
-    frameMat
-  );
+  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(sideW, SEG_H, 0.28), frameMat);
   leftWall.position.set(-SEG_W / 2 + sideW / 2, SEG_H / 2, zLocal);
 
-  const rightWall = new THREE.Mesh(
-    new THREE.BoxGeometry(sideW, SEG_H, 0.28),
-    frameMat
-  );
+  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(sideW, SEG_H, 0.28), frameMat);
   rightWall.position.set(SEG_W / 2 - sideW / 2, SEG_H / 2, zLocal);
 
-  const lintel = new THREE.Mesh(
-    new THREE.BoxGeometry(doorOpenW, topH, 0.28),
-    frameMat
-  );
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorOpenW, topH, 0.28), frameMat);
   lintel.position.set(0, doorH + topH / 2, zLocal);
+  group.add(leftWall, rightWall, lintel);
 
-  // 반쯤 삐딱하게 열려 있는 낡은 문짝
-  const ajarDoor = new THREE.Mesh(
-    new THREE.BoxGeometry(0.85, doorH - 0.04, 0.05),
-    Mat.woodDoor()
-  );
-  ajarDoor.position.set(-doorOpenW / 2 + 0.22, doorH / 2, zLocal - 0.35);
-  ajarDoor.rotation.y = 1.12;
+  if (Math.random() < 0.1) return;
 
-  group.add(leftWall, rightWall, lintel, ajarDoor);
+  // 반쯤 삐딱하게 열려 있는 낡은 문짝 (원래보다 더 닫히지는 않게 해서 통로를 막지 않음)
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const ajarDoor = new THREE.Mesh(new THREE.BoxGeometry(0.85, doorH - 0.04, 0.05), Mat.woodDoor());
+  ajarDoor.position.set(side * (-doorOpenW / 2 + 0.22), doorH / 2, zLocal - 0.35);
+  ajarDoor.rotation.y = -side * rand(1.12, 1.45);
+  group.add(ajarDoor);
 }
 
-export function populateZoneDetails(group: THREE.Group, zone: ZoneKind): void {
+function addWallDoor(group: THREE.Group, spots: SpotSpec[], mat: THREE.Material, side: number, z: number, openP: number, anomalyP: number): DoorUnit {
+  const door = makeSwingDoor(mat, Math.random() < openP);
+  onWall(door.group, side, z, 0.005);
+  group.add(door.group);
+  if (Math.random() < anomalyP) spots.push(doorSpot(door, side * (HALF - 0.6), z));
+  return door;
+}
+
+/** 서로 겹치지 않는 z 자리 몇 개를 고름 (slots 중에서 각 확률 p로) */
+function chooseSlots(slots: number[], p: number, jitter = 0.4): number[] {
+  return slots.filter(() => Math.random() < p).map((z) => z + rand(-jitter, jitter));
+}
+
+export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: SpotSpec[]): void {
   switch (zone) {
     case 'school': {
-      // 교실 문, 검은 창문, 사물함, 4:44 시계
-      for (const z of [-3.5, -9.0, -14.2]) {
-        const door = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.95, 2.05),
-          Mat.woodDoor()
-        );
-        door.rotation.y = Math.PI / 2;
-        door.position.set(-SEG_W / 2 + 0.02, 1.025, z);
-        group.add(door);
+      // 교실 문(가끔 살짝 열림), 검은 창문, 사물함, 4:44 시계, 의자, 게시판
+      for (const z of chooseSlots([-3.5, -9.0, -14.2], 0.8)) {
+        addWallDoor(group, spots, Mat.woodDoor(), -1, z, 0.2, 0.6);
 
-        // 복도 쪽 교실 창문 (안쪽은 칠흑 같은 어둠)
-        const win = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.8, 0.95),
-          Mat.black()
-        );
-        win.rotation.y = Math.PI / 2;
-        win.position.set(-SEG_W / 2 + 0.02, 1.55, z - 2.1);
+        // 복도 쪽 교실 창문 (안쪽은 칠흑, 가끔 희미하게 밝음)
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.95), Math.random() < 0.15 ? Mat.dimGlass() : Mat.black());
+        win.position.y = 1.55;
+        onWall(win, -1, z - 2.1, 0.02);
         group.add(win);
       }
 
-      // 오른쪽 벽 사물함
-      const locker = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, 1.85, 3.6),
-        Mat.locker()
-      );
-      locker.position.set(SEG_W / 2 - 0.22, 0.925, -7.5);
-      group.add(locker);
+      // 오른쪽 벽 사물함 1~2줄
+      const lockers = Math.random() < 0.3 ? 2 : 1;
+      for (let k = 0; k < lockers; k++) {
+        const len = rand(1.8, 3.6);
+        const z = lockers === 1 ? rand(-5, -11) : k === 0 ? rand(-3, -6) : rand(-10, -13);
+        const locker = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.85, len), Mat.locker());
+        locker.position.set(SEG_W / 2 - 0.22, 0.925, z);
+        group.add(locker);
+        // 하나만 문이 열린 채
+        if (Math.random() < 0.3) {
+          const lid = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1.7, 0.3), Mat.locker());
+          lid.position.set(SEG_W / 2 - 0.5, 0.95, z + rand(-len / 3, len / 3));
+          lid.rotation.y = 0.9;
+          group.add(lid);
+        }
+      }
 
       // 4시 44분 시계
-      const clock = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.45, 0.45),
-        Mat.clock()
-      );
-      clock.rotation.y = -Math.PI / 2;
-      clock.position.set(SEG_W / 2 - 0.02, 2.45, -11.5);
-      group.add(clock);
+      if (Math.random() < 0.5) {
+        const clock = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.45), Mat.clock());
+        clock.position.y = 2.45;
+        onWall(clock, 1, rand(-9, -14), 0.02);
+        group.add(clock);
+      }
+
+      // 게시판: 빛바랜 종이 몇 장
+      if (Math.random() < 0.4) {
+        const z = rand(-13, -16);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9), Mat.plain(0x3a3a38));
+        board.position.y = 1.6;
+        onWall(board, 1, z, 0.015);
+        group.add(board);
+        const papers = Math.floor(rand(2, 6));
+        for (let k = 0; k < papers; k++) {
+          const paper = new THREE.Mesh(new THREE.PlaneGeometry(rand(0.2, 0.32), rand(0.26, 0.4)), Mat.plain(0xb8b7b0));
+          paper.position.y = 1.6 + rand(-0.25, 0.25);
+          onWall(paper, 1, z + rand(-0.5, 0.5), 0.02);
+          paper.rotateZ(rand(-0.12, 0.12));
+          group.add(paper);
+        }
+      }
+
+      // 복도에 나와 있는 의자. 가끔은 처음부터 벽을 보고 있음
+      if (Math.random() < 0.3) {
+        const chair = makeProp('chair');
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const z = rand(-4, KEEP_CLEAR_Z);
+        const facesWall = Math.random() < 0.15;
+        placeOnFloor(chair, side, z, facesWall ? 'wall' : 'corridor');
+        group.add(chair);
+        if (!facesWall) {
+          spots.push({ x: side * WALL_PROP_X, z, kind: 'chair', apply: () => placeOnFloor(chair, side, z, 'wall') });
+        }
+      }
       break;
     }
 
     case 'apt404': {
-      // 양옆으로 늘어선 철문들과 부적, '404' 호수판
+      // 늘어선 철문(전부 404호), 부적, 문 앞의 물건들
+      const doors: { side: number; z: number }[] = [];
       for (const z of [-3.2, -7.8, -12.4, -15.8]) {
         for (const side of [-1, 1]) {
-          const door = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.95, 2.05),
-            Mat.steelDoor()
-          );
-          door.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
-          door.position.set(side * (SEG_W / 2 - 0.02), 1.025, z);
-          group.add(door);
+          if (Math.random() > 0.8) continue;
+          const dz = z + rand(-0.3, 0.3);
+          addWallDoor(group, spots, Mat.steelDoor(), side, dz, 0.08, 0.35);
+          doors.push({ side, z: dz });
 
-          // 호수판 (전부 404호)
-          const plate = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.28, 0.12),
-            Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true })
-          );
-          plate.rotation.y = door.rotation.y;
-          plate.position.set(side * (SEG_W / 2 - 0.03), 1.68, z);
-          group.add(plate);
+          // 호수판 (전부 404호, 가끔 떨어져 나감)
+          if (Math.random() < 0.9) {
+            const plate = new THREE.Mesh(
+              new THREE.PlaneGeometry(0.28, 0.12),
+              Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true })
+            );
+            plate.position.y = 2.2;
+            onWall(plate, side, dz, 0.03);
+            group.add(plate);
+          }
 
-          // 문 위와 주변에 어지럽게 붙은 부적 조각들
-          for (let t = 0; t < 4; t++) {
+          // 문틀 주변 부적: 없거나, 몇 장이거나, 문 하나를 뒤덮을 만큼
+          const t = Math.random();
+          const talismans = t < 0.4 ? 0 : t < 0.82 ? Math.floor(rand(1, 4)) : Math.floor(rand(9, 15));
+          for (let k = 0; k < talismans; k++) {
             const talisman = new THREE.Mesh(
               new THREE.PlaneGeometry(0.11, 0.26),
               Mat.label('勅令', { bg: '#bfbeb6', fg: '#111111', border: true })
             );
-            talisman.rotation.y = door.rotation.y;
-            talisman.rotation.z = rand(-0.25, 0.25);
-            talisman.position.set(
-              side * (SEG_W / 2 - 0.035),
-              1.85 + rand(-0.25, 0.28),
-              z + rand(-0.35, 0.35)
-            );
+            // 문짝이 아니라 문틀 위·옆 벽에 붙임 (문이 열려도 제자리)
+            const above = Math.random() < 0.5;
+            talisman.position.y = above ? rand(2.12, 2.6) : rand(0.6, 2.2);
+            const along = above ? rand(-0.45, 0.45) : (Math.random() < 0.5 ? -1 : 1) * rand(0.55, 0.75);
+            onWall(talisman, side, dz + along, 0.035);
+            talisman.rotateZ(rand(-0.25, 0.25));
             group.add(talisman);
           }
         }
+      }
+
+      // 문 앞에 가지런한 실내화: 처음부터 있거나, 나중에 생기거나
+      if (doors.length > 0) {
+        const d = pick(doors);
+        if (d.z > KEEP_CLEAR_Z) {
+          const shoes = makeProp('shoes');
+          placeOnFloor(shoes, d.side, d.z, 'corridor');
+          shoes.position.x = d.side * (HALF - 0.25);
+          group.add(shoes);
+          if (Math.random() < 0.12) {
+            // 처음부터 놓여 있음
+          } else {
+            shoes.visible = false;
+            spots.push({ x: d.side * (HALF - 0.25), z: d.z, kind: 'shoes', apply: () => (shoes.visible = true) });
+          }
+        }
+      }
+
+      // 택배 상자, 기대 놓은 우산
+      if (Math.random() < 0.25) {
+        const b = makeProp('box');
+        placeOnFloor(b, Math.random() < 0.5 ? -1 : 1, rand(-2, KEEP_CLEAR_Z), 'along');
+        group.add(b);
+      }
+      if (Math.random() < 0.18) {
+        const u = makeProp('umbrella');
+        const side = Math.random() < 0.5 ? -1 : 1;
+        placeOnFloor(u, side, rand(-2, KEEP_CLEAR_Z), 'corridor');
+        u.position.x = side * (HALF - 0.25);
+        group.add(u);
       }
       break;
     }
 
     case 'tatami': {
-      // 다다미 여관 기둥과 반쯤 열린 벽장(후스마) 어둠
-      for (let z = -2.5; z > -SEG_LEN; z -= 3.5) {
+      // 다다미 여관 기둥(간격이 복도마다 다름)과 벽장
+      const step = rand(3.0, 4.2);
+      for (let z = -rand(1.5, 3); z > -SEG_LEN + 0.5; z -= step) {
         for (const side of [-1, 1]) {
-          const pillar = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12, SEG_H, 0.12),
-            Mat.darkWood()
-          );
+          const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, SEG_H, 0.12), Mat.darkWood());
           pillar.position.set(side * (SEG_W / 2 - 0.06), SEG_H / 2, z);
           group.add(pillar);
         }
       }
 
-      // 반쯤 열린 벽장 틈새 (칠흑 같은 내부)
-      const closetVoid = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 1.9, 1.4),
-        Mat.black()
-      );
-      closetVoid.position.set(-SEG_W / 2 + 0.03, 0.95, -9.2);
-      group.add(closetVoid);
+      // 벽장 0~2개: 반쯤 열려 칠흑이 보이거나, 닫혀 있다가 열림
+      const closets = Math.floor(rand(0, 2.6));
+      for (let k = 0; k < closets; k++) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const z = rand(-3, -15);
+        const closet = makeSlidingCloset(rand(1.2, 1.6), Math.random() < 0.5);
+        onWall(closet.group, side, z, 0.02);
+        group.add(closet.group);
+        if (!closet.isOpen()) spots.push({ x: side * (HALF - 0.6), z, kind: 'door', apply: () => closet.setOpen(true) });
+      }
+
+      // 족자: 한 글자
+      if (Math.random() < 0.35) {
+        const scroll = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.42, 1.1),
+          Mat.label(pick(['静', '忌', '帰']), { w: 128, h: 320, bg: '#c3c1b8', fg: '#141414', border: true, font: 'bold 96px serif' })
+        );
+        scroll.position.y = 1.75;
+        onWall(scroll, Math.random() < 0.5 ? -1 : 1, rand(-5, -14), 0.03);
+        group.add(scroll);
+      }
+
+      // 방석 몇 장
+      if (Math.random() < 0.3) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const z = rand(-3, KEEP_CLEAR_Z);
+        for (let k = 0; k < Math.floor(rand(1, 4)); k++) {
+          const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.07, 0.55), Mat.plain(0x5c5a55));
+          cushion.position.set(side * (HALF - 0.35), 0.035 + k * 0.07, z);
+          cushion.rotation.y = rand(-0.2, 0.2);
+          group.add(cushion);
+        }
+      }
       break;
     }
 
     case 'video': {
-      // 복도를 좁게 조여오는 양옆 VHS 비디오 진열장 + 바닥의 우물 테두리 + 브라운관 TV
+      // 복도를 좁게 조여오는 VHS 진열장(빠진 자리 있음), 가끔 우물, 브라운관 TV
       for (const z of [-4.0, -9.0, -14.0]) {
         for (const side of [-1, 1]) {
-          const shelf = new THREE.Mesh(
-            new THREE.BoxGeometry(0.45, 2.15, 3.2),
-            Mat.vhsShelf()
-          );
-          shelf.position.set(side * (SEG_W / 2 - 0.24), 1.075, z);
+          if (Math.random() > 0.85) continue;
+          const len = rand(2.6, 3.4);
+          const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.45, 2.15, len), Mat.vhsShelf());
+          shelf.position.set(side * (SEG_W / 2 - 0.24), 1.075, z + rand(-0.3, 0.3));
           group.add(shelf);
         }
       }
 
-      // 복도 한가운데 솟아 있는 돌 우물 테두리
-      const well = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.62, 0.66, 0.68, 18, 1, true),
-        Mat.darkConcrete()
-      );
-      well.position.set(0.35, 0.34, -11.2);
-      group.add(well);
+      // 바닥에 흩어진 테이프
+      if (Math.random() < 0.4) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const z = rand(-3, KEEP_CLEAR_Z);
+        for (let k = 0; k < Math.floor(rand(3, 7)); k++) {
+          const tape = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.025, 0.1), Mat.plain(0x1c1c1c));
+          tape.position.set(side * rand(HALF - 0.9, HALF - 0.55), 0.013, z + rand(-0.6, 0.6));
+          tape.rotation.y = rand(0, Math.PI);
+          group.add(tape);
+        }
+      }
 
-      const wellInside = new THREE.Mesh(
-        new THREE.CircleGeometry(0.6, 16),
-        Mat.black()
-      );
-      wellInside.rotation.x = -Math.PI / 2;
-      wellInside.position.set(0.35, 0.66, -11.2);
-      group.add(wellInside);
+      // 복도 한가운데 솟아 있는 돌 우물 테두리 (가끔)
+      if (Math.random() < 0.25) {
+        const well = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.66, 0.68, 18, 1, true), Mat.darkConcrete());
+        well.position.set(0.35, 0.34, -11.2);
+        group.add(well);
 
-      // 바닥에 놓인 브라운관 TV (창백한 정적 빛 방출)
-      const tvBox = new THREE.Mesh(
-        new THREE.BoxGeometry(0.58, 0.48, 0.46),
-        Mat.darkMetal()
-      );
-      tvBox.position.set(-0.45, 0.24, -13.2);
-      tvBox.rotation.y = 0.25;
-      group.add(tvBox);
+        const wellInside = new THREE.Mesh(new THREE.CircleGeometry(0.6, 16), Mat.black());
+        wellInside.rotation.x = -Math.PI / 2;
+        wellInside.position.set(0.35, 0.66, -11.2);
+        group.add(wellInside);
+      }
 
-      const tvScreen = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.46, 0.36),
-        new THREE.MeshBasicMaterial({ color: 0xeaeae5 })
-      );
-      tvScreen.position.set(-0.45 + Math.sin(0.25) * 0.235, 0.25, -13.2 + Math.cos(0.25) * 0.235);
-      tvScreen.rotation.y = 0.25;
-      group.add(tvScreen);
+      // 바닥에 놓인 브라운관 TV 0~2대. 꺼져 있던 TV가 나중에 켜져 있기도 함
+      const tvs = Math.floor(rand(0, 2.7));
+      for (let k = 0; k < tvs; k++) {
+        const on = Math.random() < 0.35;
+        const tv = makeTV(on);
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const z = rand(-3, KEEP_CLEAR_Z);
+        placeOnFloor(tv.group, side, z, 'corridor');
+        tv.group.position.x = side * (HALF - 0.75);
+        tv.group.rotation.y += rand(-0.35, 0.35);
+        group.add(tv.group);
+        if (!on) spots.push({ x: tv.group.position.x, z, kind: 'tv', apply: () => tv.setOn(true) });
+      }
       break;
     }
 
     case 'subway': {
-      // 지하철 환승통로 안내판(출구 없음)과 얼굴 지워진 실종 전단지, 기둥
+      // 환승통로 안내판(출구는 없음), 얼굴 지워진 실종 전단지, 타일 기둥, 벤치
       const sign = new THREE.Mesh(
         new THREE.BoxGeometry(1.7, 0.34, 0.08),
-        Mat.label('← 환승통로 (출구 없음)', {
+        Mat.label(pick(['← 환승통로 (출구 없음)', '出口 →', 'EXIT ↑', '← 4번 출구', '← 出口　出口 →']), {
           w: 512,
           h: 128,
           bg: '#141414',
@@ -325,17 +585,48 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind): void {
           border: true,
         })
       );
-      sign.position.set(0, 2.55, -6.5);
+      sign.position.set(0, 2.55, rand(-4, -9));
       group.add(sign);
 
-      for (const z of [-4.5, -8.5, -13.0]) {
-        const poster = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.42, 0.58),
-          Mat.poster()
-        );
-        poster.rotation.y = Math.PI / 2;
-        poster.position.set(-SEG_W / 2 + 0.02, 1.48, z);
+      // 같은 전단지가 줄지어 붙어 있음. 그중 하나가 나중에 조금 달라져 있음
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const start = rand(-3, -6);
+      const gap = rand(0.55, 0.75);
+      const posters = Math.floor(rand(2, 6));
+      const meshes: THREE.Mesh[] = [];
+      for (let k = 0; k < posters; k++) {
+        const poster = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.58), Mat.poster());
+        poster.position.y = 1.48 + rand(-0.04, 0.04);
+        onWall(poster, side, start - k * gap, 0.02);
+        poster.rotateZ(rand(-0.05, 0.05));
         group.add(poster);
+        meshes.push(poster);
+      }
+      if (meshes.length >= 2) {
+        const target = pick(meshes);
+        spots.push({ x: side * (HALF - 0.6), z: target.position.z, kind: 'poster', apply: () => (target.material = Mat.posterBack()) });
+      }
+
+      if (Math.random() < 0.4) {
+        for (const z of [rand(-9, -10), rand(-14, -15)]) {
+          const s2 = Math.random() < 0.5 ? -1 : 1;
+          const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.3, SEG_H, 0.5), Mat.subwayTile());
+          pillar.position.set(s2 * (HALF - 0.15), SEG_H / 2, z);
+          group.add(pillar);
+        }
+      }
+
+      if (Math.random() < 0.3) {
+        const s3 = -side;
+        const z = rand(-4, KEEP_CLEAR_Z);
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 1.6), Mat.metal());
+        seat.position.set(s3 * (HALF - 0.25), 0.45, z);
+        group.add(seat);
+        for (const dz of [-0.65, 0.65]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.05), Mat.darkMetal());
+          leg.position.set(s3 * (HALF - 0.25), 0.225, z + dz);
+          group.add(leg);
+        }
       }
       break;
     }

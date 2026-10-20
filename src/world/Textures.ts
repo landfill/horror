@@ -399,6 +399,72 @@ export const Tex = {
       grime(c, w, h, 6, 0.3);
     }, false),
 
+  /** 실종 전단지의 이상한 판: 얼굴 자리에 뒤통수 (이상 현상용) */
+  posterBack: () =>
+    tex('posterBack', 128, 180, (c, w, h) => {
+      c.fillStyle = '#d5d4cc';
+      c.fillRect(0, 0, w, h);
+      c.fillStyle = '#111';
+      c.font = 'bold 26px serif';
+      c.textAlign = 'center';
+      c.fillText('찾습니다', w / 2, 30);
+      c.fillStyle = '#4a4a48';
+      c.fillRect(24, 42, 80, 86);
+      // 사진 속 사람이 돌아서 있음: 검은 머리카락만
+      const g = c.createRadialGradient(64, 92, 6, 64, 92, 40);
+      g.addColorStop(0, 'rgba(8,8,8,0.95)');
+      g.addColorStop(0.75, 'rgba(14,14,14,0.9)');
+      g.addColorStop(1, 'rgba(60,60,58,0)');
+      c.fillStyle = g;
+      c.fillRect(24, 42, 80, 86);
+      for (let i = 0; i < 4; i++) {
+        c.fillStyle = '#555';
+        c.fillRect(18, 140 + i * 9, rand(60, 92), 4);
+      }
+      grime(c, w, h, 16, 0.35);
+      drips(c, w, h, 8, 0.4);
+    }, false),
+
+  /** 벽·바닥·천장에 붙이는 얼룩 (투명 배경). 0: 물 샌 자국, 1: 그을음·곰팡이, 2: 흘러내린 자국 */
+  stain: (v: number) =>
+    tex(`stain:${v}`, 128, 128, (c, w, h) => {
+      c.clearRect(0, 0, w, h);
+      if (v === 0) {
+        for (let k = 0; k < 3; k++) {
+          const r = w * rand(0.25, 0.45);
+          const x = w / 2 + rand(-10, 10);
+          const y = h / 2 + rand(-10, 10);
+          const g = c.createRadialGradient(x, y, r * 0.55, x, y, r);
+          g.addColorStop(0, 'rgba(0,0,0,0.08)');
+          g.addColorStop(0.85, 'rgba(0,0,0,0.42)');
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g;
+          c.fillRect(0, 0, w, h);
+        }
+      } else if (v === 1) {
+        for (let k = 0; k < 40; k++) {
+          const x = w / 2 + rand(-1, 1) * rand(0, w * 0.4);
+          const y = h / 2 + rand(-1, 1) * rand(0, h * 0.4);
+          const r = rand(3, 16);
+          const g = c.createRadialGradient(x, y, 0, x, y, r);
+          g.addColorStop(0, `rgba(0,0,0,${rand(0.2, 0.55)})`);
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g;
+          c.fillRect(x - r, y - r, r * 2, r * 2);
+        }
+      } else {
+        for (let k = 0; k < 14; k++) {
+          const x = rand(w * 0.2, w * 0.8);
+          const len = rand(h * 0.3, h * 0.95);
+          const g = c.createLinearGradient(0, 0, 0, len);
+          g.addColorStop(0, `rgba(0,0,0,${rand(0.3, 0.6)})`);
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g;
+          c.fillRect(x, 0, rand(1.5, 5), len);
+        }
+      }
+    }, false),
+
   // ---------------- 귀신 ----------------
 
   dress: () =>
@@ -512,6 +578,34 @@ function basic(key: string, color: number): THREE.MeshBasicMaterial {
   return m;
 }
 
+const VARIANT_TINTS = [0xffffff, 0xdcdcda, 0xbdbdba, 0x9e9e9b];
+
+/**
+ * 같은 재질의 변형: 밝기를 조금 바꾸고 무늬 위치를 밀거나 좌우를 뒤집음.
+ * 텍스처는 원본 이미지를 공유하므로 GPU 메모리는 늘지 않습니다. 변형은 v 값마다 하나씩만 캐시됩니다.
+ */
+export function variantOf(base: THREE.Material, v: number): THREE.Material {
+  if (v === 0 || !(base instanceof THREE.MeshLambertMaterial)) return base;
+  const key = `variant:${base.uuid}:${v}`;
+  let m = matCache.get(key);
+  if (!m) {
+    const lm = base.clone();
+    lm.color.setHex(VARIANT_TINTS[v % VARIANT_TINTS.length]).multiply(base.color);
+    if (base.map) {
+      const t = base.map.clone();
+      t.offset.set((v * 0.37) % 1, (v * 0.23) % 1);
+      if (v % 2 === 1 && t.wrapS === THREE.RepeatWrapping) t.repeat.x = -1;
+      t.needsUpdate = true;
+      lm.map = t;
+    }
+    m = lm;
+    matCache.set(key, m);
+  }
+  return m;
+}
+
+export const VARIANT_COUNT = VARIANT_TINTS.length;
+
 export const Mat = {
   concrete: () => lambert('concrete', Tex.concrete),
   darkConcrete: () => lambert('darkConcrete', Tex.concrete, 0x555555),
@@ -530,6 +624,19 @@ export const Mat = {
   metal: () => lambert('metal', Tex.metal),
   locker: () => lambert('locker', Tex.locker),
   poster: () => lambert('poster', Tex.poster),
+  posterBack: () => lambert('posterBack', Tex.posterBack),
+  stain: (v: number) =>
+    lambert(`stain:${v}`, () => Tex.stain(v), 0xffffff, {
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
+    }),
+  /** 꺼진 / 켜진 브라운관 화면, 희미하게 불 켜진 창 */
+  screenOff: () => basic('screenOff', 0x101010),
+  screenOn: () => basic('screenOn', 0xe6e6e1),
+  dimGlass: () => basic('dimGlass', 0x2e2e2c),
   clock: () => lambert('clock', Tex.clock, 0xffffff, { transparent: true, alphaTest: 0.1 }),
   darkMetal: () => lambert('darkMetal', null, 0x2a2a2a),
   plain: (v: number) => lambert(`plain:${v}`, null, v),

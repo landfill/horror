@@ -24,6 +24,7 @@ import {
   zoneOf,
 } from './Maze';
 import { Haunts } from './Haunts';
+import { Anomalies } from './Anomalies';
 import { pick, rand } from './Textures';
 
 const BUILD_RADIUS = 2; // 이 맨해튼 거리 안의 교차로는 생성
@@ -62,6 +63,7 @@ export class EndlessWorld {
   private loadedNodes = new Set<string>();
   private lights: LightPool;
   public readonly haunts: Haunts;
+  public readonly anomalies: Anomalies;
 
   private player = new THREE.Vector3();
   private lastValid = new THREE.Vector3(0, 0, 0);
@@ -83,6 +85,7 @@ export class EndlessWorld {
     this.sound = sound;
     this.lights = new LightPool(scene);
     this.haunts = new Haunts(scene, sound, pool, this.lights, this);
+    this.anomalies = new Anomalies(sound, this.lights);
     this.stream(0, 0);
   }
 
@@ -99,7 +102,7 @@ export class EndlessWorld {
         z: w.z,
         base: f.base,
         seed: Math.random() * 100,
-        dead: false,
+        dead: f.dead ?? false,
         current: f.base,
         mat: f.mat,
       };
@@ -116,6 +119,7 @@ export class EndlessWorld {
     const p = this.pieces.get(key);
     if (!p) return;
     this.haunts.onCellDisposed(key);
+    this.anomalies.removePiece(key);
     this.lights.remove(key);
     this.scene.remove(p.root);
     p.root.traverse((obj) => {
@@ -136,7 +140,9 @@ export class EndlessWorld {
     const root = new THREE.Group();
     built.group.position.set(c.x, 0, c.z);
     root.add(built.group);
-    this.addPiece(key, root, this.toFixtures(built.fixtures, (x, z) => ({ x: c.x + x, z: c.z + z })));
+    const toWorld = (x: number, z: number) => ({ x: c.x + x, z: c.z + z });
+    this.addPiece(key, root, this.toFixtures(built.fixtures, toWorld));
+    this.anomalies.add(key, built.spots, toWorld);
     this.haunts.onJunctionBuilt(key, i, j, zone, root);
   }
 
@@ -149,7 +155,9 @@ export class EndlessWorld {
     built.group.rotation.y = frame.rotY;
     const root = new THREE.Group();
     root.add(built.group);
-    this.addPiece(key, root, this.toFixtures(built.fixtures, (x, z) => corridorToWorld(frame, x, z)));
+    const toWorld = (x: number, z: number) => corridorToWorld(frame, x, z);
+    this.addPiece(key, root, this.toFixtures(built.fixtures, toWorld));
+    this.anomalies.add(key, built.spots, toWorld);
     this.haunts.onCorridorBuilt(key, zone, frame, built.group);
   }
 
@@ -391,6 +399,9 @@ export class EndlessWorld {
 
     // 6. 귀신
     this.haunts.update(dt, elapsed, playerPos, cameraForward, isMoving);
+
+    // 6-1. 사물·공간의 이상 현상 (귀신이 보이는 동안에는 쉼)
+    this.anomalies.update(dt, playerPos, cameraForward, this.haunts.presenceActive);
 
     // 7. 등 뒤에서 반 박자 늦게 따라오는 젖은 발소리 (드물게)
     if (isMoving) {

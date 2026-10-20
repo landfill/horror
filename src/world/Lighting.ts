@@ -114,6 +114,32 @@ export class LightPool {
     }
   }
 
+  /**
+   * 플레이어 등 뒤(forward와 반대쪽)에서 켜져 있는 기구 중 가장 먼 것 하나를 꺼뜨림.
+   * 여러 번 부르면 뒤쪽 어둠이 플레이어 쪽으로 다가옴. 꺼뜨렸으면 true.
+   */
+  public killFarthestBehind(px: number, pz: number, fx: number, fz: number, minD: number, maxD: number): boolean {
+    let best: Fixture | null = null;
+    let bd = -1;
+    const fl = Math.hypot(fx, fz) || 1;
+    for (const f of this.list()) {
+      if (f.dead || f.base <= 0) continue;
+      const dx = f.x - px;
+      const dz = f.z - pz;
+      const d = Math.hypot(dx, dz);
+      if (d < minD || d > maxD) continue;
+      // 정면에서 110° 이상 벗어난 곳(등 뒤)만
+      if ((dx * fx + dz * fz) / (d * fl) > -0.34) continue;
+      if (d > bd) {
+        bd = d;
+        best = f;
+      }
+    }
+    if (!best) return false;
+    best.dead = true;
+    return true;
+  }
+
   /** 가장 가까운 기구 하나를 꺼뜨림 (귀신과 마주친 뒤 어둠 속에 남겨두는 연출) */
   public killNearest(x: number, z: number): void {
     let best: Fixture | null = null;

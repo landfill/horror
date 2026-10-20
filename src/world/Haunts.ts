@@ -170,6 +170,11 @@ export class Haunts {
     private world: EndlessWorld
   ) {}
 
+  /** 귀신이 지금 모습을 드러낸 상태인지 (사물 이상 현상과 겹치지 않게 하는 데 씀. 읽기 전용) */
+  public get presenceActive(): boolean {
+    return Boolean(this.active?.everSeen || this.follower?.everSeen);
+  }
+
   // -------------------------------------------------------------------------
   // 배치
   // -------------------------------------------------------------------------
