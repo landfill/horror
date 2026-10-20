@@ -8,6 +8,9 @@ import { FirstPersonControls } from './input/FirstPersonControls';
 import { MonochromeShader } from './fx/MonochromeShader';
 import { EndlessWorld } from './world/EndlessWorld';
 import { VideoClipPool } from './ghost/VideoClipPool';
+import { AWAY_TITLES, HOME_TITLE, TitleScreen } from './ui/TitleScreen';
+
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 /**
  * 게임적 목표(점수, 수칙, 엘리베이터 이동, 클리어)를 완전히 배제하고,
@@ -26,6 +29,10 @@ class InescapableHorrorApp {
   private ghostClips: VideoClipPool;
 
   private isPaused = true;
+  /** 첫 화면을 보고 있는 동안: 복도는 그려지지만 귀신·이동은 멈춰 있음 */
+  private onTitle = true;
+  private title = new TitleScreen();
+  private awayTitleIndex = 0;
   // 자막은 기본 꺼짐 (청각 접근성용 옵션으로만 제공)
   private showSubtitles = false;
   private stepDistanceAccum = 0;
@@ -101,6 +108,7 @@ class InescapableHorrorApp {
 
     this.bindUI();
     this.setupTabTitleDread();
+    this.title.start();
 
     window.addEventListener('resize', () => this.updateRendererSize());
     requestAnimationFrame((t) => this.animate(t));
@@ -142,6 +150,8 @@ class InescapableHorrorApp {
       this.sound.init();
       // iOS 등에서 영상 재생을 허용받으려면 사용자 클릭 안에서 한 번 재생해야 함
       this.ghostClips.unlock();
+      this.onTitle = false;
+      this.title.stop();
       startScreen.classList.remove('active');
       this.hudEl.classList.remove('hidden');
       this.resume();
@@ -197,14 +207,25 @@ class InescapableHorrorApp {
   private setupTabTitleDread(): void {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        document.title = '…어디로도 나갈 수 없다';
+        document.title = AWAY_TITLES[this.awayTitleIndex++ % AWAY_TITLES.length];
       } else {
-        document.title = '04:44 — 출구 없음';
+        document.title = HOME_TITLE;
         if (!this.isPaused) {
           this.sound.playCreak(undefined, '[문 닫히는 소리]');
         }
       }
     });
+  }
+
+  /** 첫 화면 뒤의 복도: 숨 쉬듯 아주 느린 시선 흔들림 + 형광등 깜빡임만 */
+  private idleOnTitle(): void {
+    const t = this.elapsed;
+    if (!REDUCED_MOTION) {
+      const yaw = Math.sin(t * 0.13) * 0.05 + Math.sin(t * 0.047) * 0.03;
+      const pitch = Math.sin(t * 0.09) * 0.012 - 0.015;
+      this.controls.setOrientation(yaw, pitch);
+    }
+    this.world.idle(t);
   }
 
   private animate(now: number): void {
@@ -262,6 +283,8 @@ class InescapableHorrorApp {
         isMoving
       );
     }
+
+    if (this.onTitle) this.idleOnTitle();
 
     // 흑백 셰이더 유니폼 업데이트
     this.monoPass.uniforms['uTime'].value = this.elapsed;
