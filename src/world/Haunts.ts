@@ -26,7 +26,7 @@ export type HauntKind =
   | 'approach' // 복도 끝에서 아주 느리게 다가옴
   | 'watcher' // 서서 지켜보다가 다시 보면 없어져 있음
   | 'ceiling' // 천장에 붙어 내려다봄
-  | 'wallcrawl' // 벽을 기어옴. 보고 있으면 멈추고, 안 보면 다가옴
+  | 'wallcrawl' // 벽을 기어오름. 천장에 닿으면 매달려 멈추고, 안 보면 벽을 따라 다가옴
   | 'floorcrawl' // 바닥을 기어옴
   | 'peek' // 교차로 모퉁이에서 내다보다 숨음
   | 'suspended' // 허공에 매달려 있음
@@ -43,6 +43,12 @@ const ACTIVATE_DIST = 34; // 이 거리 안에 들어오면 (안 보일 때) 나
 const DEACTIVATE_DIST = 40;
 const SEE_DIST = 22;
 const SEE_COS = 0.72; // 시야 중심에서 약 44도 안쪽
+/** 벽 오르기: 초당 오르는 높이(m), 발에서 뻗은 손끝까지 높이(m) */
+const WALLCLIMB_SPEED = 0.25;
+const WALLCLIMB_REACH = 1.75;
+/** 벽 귀신 판을 플레이어 쪽으로 트는 최대 각도, 몸(팔 포함)의 반폭(m) */
+const WALLCLIMB_MAX_TURN = (55 * Math.PI) / 180;
+const WALLCLIMB_HALF_WIDTH = 0.3;
 
 /** 공간별로 나올 수 있는 복도 귀신 (비디오 대여점은 양쪽 진열장에 벽 귀신이 묻혀 제외) */
 const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
@@ -53,11 +59,11 @@ const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
   subway: ['approach', 'floorcrawl', 'ceiling', 'wallcrawl', 'watcher'],
 };
 
-/** 출현 비중: 천장·기어오기·다가오기를 다른 귀신의 3배로 */
+/** 출현 비중: 천장·기어오기는 다른 귀신의 3배, 걸어오기는 12배 */
 const KIND_WEIGHT: Partial<Record<HauntKind, number>> = {
   ceiling: 3,
   floorcrawl: 3,
-  approach: 3,
+  approach: 12,
 };
 
 function pickWeighted(kinds: HauntKind[]): HauntKind | null {
@@ -116,6 +122,8 @@ interface Haunt {
   /** 복도 로컬 좌표 (복도형 귀신) */
   lx: number;
   lz: number;
+  /** 벽을 오르는 귀신의 발 높이 (m) */
+  ly: number;
   /** 벽 쪽 (-1 왼쪽 / 1 오른쪽) */
   side: number;
   zone?: ZoneKind;
@@ -211,6 +219,7 @@ export class Haunts {
       kind,
       lx: 0,
       lz: -12,
+      ly: 0,
       side: Math.random() < 0.5 ? -1 : 1,
       ghost: null,
       done: false,
@@ -256,8 +265,7 @@ export class Haunts {
         y = h.ghost?.hangs ? SEG_H - 0.7 : SEG_H - 0.1;
         break;
       case 'wallcrawl':
-        y = 1.55;
-        lz = h.lz + this.headSign(h) * 0.95;
+        y = h.ly + 0.95; // 몸 가운데
         lx = h.side * (HALF - 0.08);
         break;
       case 'floorcrawl':
@@ -412,7 +420,8 @@ export class Haunts {
         g = new VideoGhost(role, this.pool, { billboard: false, shadow: false });
         h.lz = far();
         h.lx = h.side * (HALF - 0.03);
-        g.body.position.y = 1.55; // 눈높이 근처, 벽 높은 곳
+        // 바닥 가까이에서 오르기 시작
+        h.ly = rand(0.1, 0.4);
         break;
       }
       case 'crouched': {
@@ -487,12 +496,6 @@ export class Haunts {
     return Math.abs(pl.lx) < HALF + 0.3 && pl.lz < SEG_W && pl.lz > -18 - SEG_W;
   }
 
-  private headSign(h: Haunt): number {
-    // 벽을 기는 귀신은 플레이어 쪽으로 머리를 둠
-    const pl = h.frame ? worldToCorridor(h.frame, this.camPos.x, this.camPos.z) : { lz: 0 };
-    return pl.lz > h.lz ? 1 : -1;
-  }
-
   private syncCorridorGhost(h: Haunt): void {
     if (!h.ghost || !h.frame) return;
     const g = h.ghost;
@@ -502,14 +505,34 @@ export class Haunts {
       g.root.position.set(w.x, SEG_H - 0.03, w.z);
       return;
     }
+    if (h.kind === 'wallcrawl') {
+      this.syncWallClimber(h);
+      return;
+    }
     const w = corridorToWorld(h.frame, h.lx, h.lz);
     g.root.position.set(w.x, h.kind === 'suspended' ? 0.3 : 0, w.z);
-    if (h.kind === 'wallcrawl') {
-      // 벽을 향해 눕히고(안쪽을 보게), 머리가 이동 방향을 향하도록 굴림
-      const s = this.headSign(h);
-      const roll = h.side === -1 ? (s * Math.PI) / 2 : (-s * Math.PI) / 2;
-      g.body.quaternion.setFromEuler(new THREE.Euler(0, h.side === -1 ? Math.PI / 2 : -Math.PI / 2, roll, 'YXZ'));
-    }
+  }
+
+  /**
+   * 위로 기어오르는 뒷모습 영상을 벽에 세움.
+   * 판을 벽과 나란히 두면 복도를 따라 보는 플레이어에게는 거의 옆면만 보여 종이처럼 납작해짐.
+   * 그래서 판을 플레이어 쪽으로 최대 WALLCLIMB_MAX_TURN까지 틀고, 튼 만큼 벽에서 띄워 몸이 벽에 박히지 않게 함.
+   */
+  private syncWallClimber(h: Haunt): void {
+    const g = h.ghost!;
+    const frame = h.frame!;
+    const pl = worldToCorridor(frame, this.camPos.x, this.camPos.z);
+    // 복도 로컬 좌표에서 판의 정면 방향 각도 (atan2(x, z)). 벽 정면 = 복도 가운데 쪽
+    const wallYaw = h.side === -1 ? Math.PI / 2 : -Math.PI / 2;
+    const toPlayer = Math.atan2(pl.lx - h.side * HALF, pl.lz - h.lz);
+    let turn = toPlayer - wallYaw;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn)); // -π~π로
+    turn = Math.max(-WALLCLIMB_MAX_TURN, Math.min(WALLCLIMB_MAX_TURN, turn));
+    const off = WALLCLIMB_HALF_WIDTH * Math.abs(Math.sin(turn));
+    const w = corridorToWorld(frame, h.side * (HALF - 0.03 - off), h.lz);
+    g.root.position.set(w.x, 0, w.z);
+    g.body.position.y = h.ly;
+    g.body.rotation.set(0, wallYaw + turn, 0);
   }
 
   // -------------------------------------------------------------------------
@@ -655,19 +678,33 @@ export class Haunts {
     }
   }
 
-  /** 벽을 기어옴: 보고 있으면 그대로 멈춰 있고, 시선을 돌리면 다가옴 */
+  /** 벽을 기어오름: 보는 동안 천장을 향해 오르고, 시선을 돌리면 벽을 따라 다가와 있음 */
   private updateWallCrawl(h: Haunt, dt: number, dist: number, seen: boolean, c: THREE.Vector3): void {
     const g = h.ghost!;
     const pl = worldToCorridor(h.frame!, this.camPos.x, this.camPos.z);
-    if (seen) {
+    if (seen && dist < 2.8 && h.seenTime > 0.25) {
+      this.jolt(h, c);
+      return;
+    }
+    // 손끝이 천장에 닿으면 그 자리에 매달려 멈춤. 한 번 본 뒤 시선을 돌리면 천장 너머로 사라져 있음
+    const top = SEG_H - WALLCLIMB_REACH;
+    if (h.ly >= top) {
       g.freeze = true;
-      if (dist < 2.8 && h.seenTime > 0.25) this.jolt(h, c);
+      if (h.everSeen && !seen && h.unseenTime > 0.8) {
+        this.vanishQuietly(h);
+        return;
+      }
+      this.syncCorridorGhost(h); // 매달려 있어도 판은 계속 플레이어 쪽으로
       return;
     }
     g.freeze = false;
-    if (!this.inCorridorView(pl) || dist < 2.6) return;
-    const speed = h.everSeen ? 1.1 : 0.45;
-    h.lz += Math.sign(pl.lz - h.lz) * speed * dt;
+    // 영상 속 손발 움직임에 맞춰 위로 기어오름
+    h.ly = Math.min(top, h.ly + WALLCLIMB_SPEED * dt);
+    // 안 보는 사이에는 벽을 따라 플레이어 쪽으로 다가와 있음
+    if (!seen && this.inCorridorView(pl) && dist > 2.6) {
+      const speed = h.everSeen ? 1.1 : 0.45;
+      h.lz += Math.sign(pl.lz - h.lz) * speed * dt;
+    }
     this.syncCorridorGhost(h);
     h.soundTimer -= dt;
     if (h.soundTimer <= 0) {
