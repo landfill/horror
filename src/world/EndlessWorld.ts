@@ -342,9 +342,9 @@ export class EndlessWorld {
     this.stream(x, z);
   }
 
-  /** 첫 화면용: 귀신·길 바꾸기 없이 형광등 깜빡임만 */
-  public idle(elapsed: number): void {
-    this.lights.update(elapsed, this.player.x, this.player.z);
+  /** 첫 화면용: 귀신·길 바꾸기 없이 형광등만. steady면 깜빡임도 없음 */
+  public idle(elapsed: number, steady = false): void {
+    this.lights.update(elapsed, this.player.x, this.player.z, steady);
   }
 
   public flash(brightness: number, distort: number): void {

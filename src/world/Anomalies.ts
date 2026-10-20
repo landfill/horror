@@ -133,7 +133,8 @@ export class Anomalies {
       }
     }
 
-    // 2. 등 뒤 형광등이 차례로 꺼지는 중
+    // 2. 등 뒤 형광등이 차례로 꺼지는 중 (귀신이 보이면 남은 순서는 취소)
+    if (ghostPresent) this.lightsQueue = 0;
     if (this.lightsQueue > 0) {
       this.lightsTimer -= dt;
       if (this.lightsTimer <= 0) {

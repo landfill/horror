@@ -220,7 +220,7 @@ class InescapableHorrorApp {
     });
   }
 
-  /** 첫 화면 뒤의 복도: 숨 쉬듯 아주 느린 시선 흔들림 + 형광등 깜빡임만 */
+  /** 첫 화면 뒤의 복도: 숨 쉬듯 아주 느린 시선 흔들림 + 형광등 깜빡임 (움직임 줄이기 설정이면 둘 다 없음) */
   private idleOnTitle(): void {
     const t = this.elapsed;
     if (!REDUCED_MOTION) {
@@ -228,7 +228,7 @@ class InescapableHorrorApp {
       const pitch = Math.sin(t * 0.09) * 0.012 - 0.015;
       this.controls.setOrientation(yaw, pitch);
     }
-    this.world.idle(t);
+    this.world.idle(t, REDUCED_MOTION);
   }
 
   private animate(now: number): void {

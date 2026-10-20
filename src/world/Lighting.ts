@@ -57,7 +57,8 @@ export class LightPool {
     return this.all;
   }
 
-  public update(elapsed: number, px: number, pz: number): void {
+  /** steady: 깜빡임 없이 고정 밝기 (움직임 줄이기 설정의 첫 화면용) */
+  public update(elapsed: number, px: number, pz: number, steady = false): void {
     const list = this.list();
     for (const f of list) {
       if (f.dead) {
@@ -66,7 +67,7 @@ export class LightPool {
         continue;
       }
       const n = Math.sin(elapsed * 19 + f.seed) * Math.sin(elapsed * 43 + f.seed * 2.1);
-      const drop = n > 0.82 ? 0.18 : n < -0.9 ? 0.45 : 1.0;
+      const drop = steady ? 1.0 : n > 0.82 ? 0.18 : n < -0.9 ? 0.45 : 1.0;
       f.current = f.base * drop;
       const c = (drop * 215) / 255;
       f.mat.color.setRGB(c, c, c);
