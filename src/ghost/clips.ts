@@ -98,7 +98,9 @@ export const GHOST_CLIPS: GhostClip[] = [
   {
     // Flow(Veo) 생성본. 카메라 쪽으로 걸어오는 영상이라 역재생본 없이 그대로 사용.
     // 원본: ghost-raw/approach_test_720p.mp4
-    // 변환: scripts/make-ghost-clip.sh ghost-raw/approach_test_720p.mp4 approach --cover 90x90 --height 1280 --fps 24 --loopfade 1.2
+    // 영상 속 인물이 점점 커져서 반복할 때마다 작아 보이므로, 먼저 크기를 고정함:
+    //   python scripts/stabilize-ghost-clip.py ghost-raw/approach_test_720p.mp4 ghost-raw/approach_stable.mp4 --cover 90x90
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/approach_stable.mp4 approach --height 1280 --fps 24 --loopfade 1.2
     id: 'approach',
     src: '/ghosts/approach.mp4',
     aspect: 0.5594,
@@ -110,7 +112,8 @@ export const GHOST_CLIPS: GhostClip[] = [
   },
   {
     // Flow(Veo) 생성본. 원본: ghost-raw/crawling_test_720p.mp4
-    // 변환: scripts/make-ghost-clip.sh ghost-raw/crawling_test_720p.mp4 crawling --cover 90x90 --height 1280 --fps 24 --loopfade 1.2
+    // 크기 고정: python scripts/stabilize-ghost-clip.py ghost-raw/crawling_test_720p.mp4 ghost-raw/crawling_stable.mp4 --cover 90x90
+    // 변환: scripts/make-ghost-clip.sh ghost-raw/crawling_stable.mp4 crawling --height 1280 --fps 24 --loopfade 1.2
     id: 'crawling',
     src: '/ghosts/crawling.mp4',
     aspect: 0.5594,
