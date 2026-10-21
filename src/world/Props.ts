@@ -34,8 +34,9 @@ function shared<T extends THREE.BufferGeometry>(g: T): T {
   return g;
 }
 const UNIT_BOX = shared(new THREE.BoxGeometry(1, 1, 1));
-const UNIT_CYL = shared(new THREE.CylinderGeometry(0.5, 0.5, 1, 10));
-const UNIT_BLOB = shared(new THREE.IcosahedronGeometry(0.5, 1));
+// 모바일 부담을 줄이려고 면 수를 적게: 원기둥 8각(32삼각형), 덩어리 20면체(20)
+const UNIT_CYL = shared(new THREE.CylinderGeometry(0.5, 0.5, 1, 8));
+const UNIT_BLOB = shared(new THREE.IcosahedronGeometry(0.5, 0));
 const UNIT_PLANE = shared(new THREE.PlaneGeometry(1, 1));
 
 function box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
@@ -49,6 +50,13 @@ function cyl(r: number, h: number, mat: THREE.Material, x: number, y: number, z:
   const m = new THREE.Mesh(UNIT_CYL, mat);
   m.scale.set(r * 2, h, r * 2);
   m.position.set(x, y, z);
+  return m;
+}
+
+/** 공유 상자 (가로 w, 높이 h, 깊이 d). UV는 크기와 상관없이 면마다 0~1이라 텍스처도 예전과 같게 붙음 */
+export function boxMesh(w: number, h: number, d: number, mat: THREE.Material): THREE.Mesh {
+  const m = new THREE.Mesh(UNIT_BOX, mat);
+  m.scale.set(w, h, d);
   return m;
 }
 
@@ -126,20 +134,13 @@ export function makeProp(kind: PropKind): THREE.Group {
       break;
     }
     case 'extinguisher': {
-      // 벽 앞 바닥에 세워 둔 소화기
-      const body = Mat.plain(0x4c4c4a);
-      g.add(cyl(0.08, 0.46, body, 0, 0.23, 0));
-      g.add(box(0.05, 0.07, 0.05, Mat.darkMetal(), 0, 0.5, 0));
-      g.add(box(0.02, 0.3, 0.02, Mat.plain(0x1a1a1a), 0.07, 0.32, 0.04));
+      // 벽 앞 바닥에 세워 둔 소화기 (원기둥 하나)
+      g.add(cyl(0.08, 0.5, Mat.plain(0x4c4c4a), 0, 0.25, 0));
       break;
     }
     case 'trashbin': {
-      // 둥근 쓰레기통 (안은 칠흑)
+      // 뚜껑 덮인 둥근 쓰레기통 (원기둥 하나)
       g.add(cyl(0.22, 0.72, Mat.metal(), 0, 0.36, 0));
-      const inside = plane(0.3, 0.3, Mat.black());
-      inside.rotation.x = -Math.PI / 2;
-      inside.position.y = 0.722;
-      g.add(inside);
       break;
     }
     case 'bag': {
@@ -193,15 +194,15 @@ export interface DoorUnit {
 export function makeSwingDoor(mat: THREE.Material, open: boolean, w = 0.95, h = 2.05): DoorUnit {
   const group = new THREE.Group();
 
-  const closed = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  const closed = plane(w, h, mat);
   closed.position.set(0, h / 2, 0.02);
 
-  const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), Mat.black());
+  const voidMesh = plane(w, h, Mat.black());
   voidMesh.position.set(0, h / 2, 0.01);
 
   const pivot = new THREE.Group();
   pivot.position.set(w / 2, 0, 0.03);
-  const leaf = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), mat);
+  const leaf = boxMesh(w, h, 0.04, mat);
   leaf.position.set(-w / 2, h / 2, 0.02);
   pivot.add(leaf);
   pivot.rotation.y = rand(0.3, 0.42);
@@ -231,11 +232,11 @@ export function makeSwingDoor(mat: THREE.Material, open: boolean, w = 0.95, h = 
 export function makeSlidingCloset(w: number, open: boolean): DoorUnit {
   const group = new THREE.Group();
   const h = 1.9;
-  const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), Mat.black());
+  const voidMesh = plane(w, h, Mat.black());
   voidMesh.position.set(0, h / 2, 0.01);
-  const panel = new THREE.Mesh(new THREE.BoxGeometry(w / 2, h, 0.03), Mat.shoji());
+  const panel = boxMesh(w / 2, h, 0.03, Mat.shoji());
   panel.position.y = h / 2;
-  const panel2 = new THREE.Mesh(new THREE.BoxGeometry(w / 2, h, 0.03), Mat.shoji());
+  const panel2 = boxMesh(w / 2, h, 0.03, Mat.shoji());
   panel2.position.set(w / 4, h / 2, 0.035);
   group.add(voidMesh, panel, panel2);
 
@@ -259,7 +260,7 @@ export function makeSlidingCloset(w: number, open: boolean): DoorUnit {
 export function makeTV(on: boolean): { group: THREE.Group; setOn: (on: boolean) => void } {
   const group = new THREE.Group();
   group.add(box(0.58, 0.48, 0.46, Mat.darkMetal(), 0, 0.24, 0));
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.36), on ? Mat.screenOn() : Mat.screenOff());
+  const screen = plane(0.46, 0.36, on ? Mat.screenOn() : Mat.screenOff());
   screen.position.set(0, 0.25, 0.235);
   group.add(screen);
   return {
@@ -272,7 +273,7 @@ export function makeTV(on: boolean): { group: THREE.Group; setOn: (on: boolean) 
 
 /** 얼룩 한 장. 평면의 앞면(+z)이 보이는 쪽 */
 export function makeStain(w: number, h: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), Mat.stain(Math.floor(Math.random() * 3)));
+  const m = plane(w, h, Mat.stain(Math.floor(Math.random() * 3)));
   m.renderOrder = 1;
   return m;
 }
@@ -281,7 +282,7 @@ export function makeStain(w: number, h: number): THREE.Mesh {
 export function makeCeilingHole(): THREE.Group {
   const g = new THREE.Group();
   const s = rand(0.5, 0.62);
-  const hole = new THREE.Mesh(new THREE.PlaneGeometry(s, s), Mat.black());
+  const hole = plane(s, s, Mat.black());
   hole.rotation.x = Math.PI / 2;
   hole.position.y = SEG_H - 0.004;
   g.add(hole);

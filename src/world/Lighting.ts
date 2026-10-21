@@ -16,6 +16,8 @@ export interface Fixture {
   dead: boolean;
   /** 이번 프레임의 밝기 */
   current: number;
+  /** 이번 프레임의 플레이어와의 거리 (LightPool 내부용) */
+  dist: number;
   mat: THREE.MeshBasicMaterial;
 }
 
@@ -24,11 +26,14 @@ export interface Fixture {
  * three.js는 조명 개수가 바뀌면 모든 재질의 셰이더를 다시 컴파일해서 화면이 멈칫하므로,
  * 매 프레임 플레이어에게 가까운 기구 12개에 조명을 옮겨 붙입니다.
  */
+const byDist = (a: Fixture, b: Fixture) => a.dist - b.dist;
+
 export class LightPool {
   private lights: THREE.PointLight[] = [];
   private groups = new Map<string, Fixture[]>();
   private all: Fixture[] = [];
   private dirty = true;
+  private order: Fixture[] = [];
 
   constructor(scene: THREE.Scene) {
     for (let k = 0; k < POOL_SIZE; k++) {
@@ -73,21 +78,27 @@ export class LightPool {
       f.mat.color.setRGB(c, c, c);
     }
 
-    const sorted = list
-      .map((f) => ({ f, d: Math.hypot(f.x - px, f.z - pz) }))
-      .sort((a, b) => a.d - b.d);
+    // 가까운 기구 12개 고르기: 매 프레임 배열·객체를 새로 만들지 않도록 재사용 버퍼에 거리만 적고 정렬
+    const order = this.order;
+    order.length = list.length;
+    for (let k = 0; k < list.length; k++) {
+      const f = list[k];
+      f.dist = Math.hypot(f.x - px, f.z - pz);
+      order[k] = f;
+    }
+    order.sort(byDist);
 
     for (let k = 0; k < this.lights.length; k++) {
       const l = this.lights[k];
-      const s = sorted[k];
-      if (!s) {
+      const f = order[k];
+      if (!f) {
         l.intensity = 0;
         continue;
       }
       // 멀리 있는 조명은 서서히 꺼지게 해서 다른 기구로 옮겨 갈 때 튀지 않게 함
-      const fade = 1 - THREE.MathUtils.smoothstep(s.d, FADE_START, FADE_END);
-      l.position.set(s.f.x, s.f.y, s.f.z);
-      l.intensity = s.f.current * fade;
+      const fade = 1 - THREE.MathUtils.smoothstep(f.dist, FADE_START, FADE_END);
+      l.position.set(f.x, f.y, f.z);
+      l.intensity = f.current * fade;
     }
   }
 

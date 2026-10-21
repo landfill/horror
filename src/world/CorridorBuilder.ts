@@ -11,6 +11,7 @@ import {
   makeStain,
   makeSwingDoor,
   makeTV,
+  boxMesh,
   plane,
 } from './Props';
 import type { SpotSpec } from './Anomalies';
@@ -79,13 +80,13 @@ const variant = () => Math.floor(Math.random() * VARIANT_COUNT);
 
 function addFixture(group: THREE.Group, out: FixtureSpec[], x: number, z: number, base: number, dead = false, hanging = false): void {
   const mat = new THREE.MeshBasicMaterial({ color: dead ? 0x181818 : 0xd8d8d2 });
-  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.04, 0.14), mat);
+  const tube = boxMesh(0.65, 0.04, 0.14, mat);
   tube.userData.fixture = true;
   if (hanging) {
     // 한쪽 고정이 빠져 비스듬히 매달린 등
     tube.position.set(x, SEG_H - 0.2, z);
     tube.rotation.z = rand(0.45, 0.6) * (Math.random() < 0.5 ? -1 : 1);
-    const wire = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.2, 0.01), Mat.darkMetal());
+    const wire = boxMesh(0.01, 0.2, 0.01, Mat.darkMetal());
     wire.position.set(x + Math.sign(tube.rotation.z) * 0.29, SEG_H - 0.1, z);
     group.add(wire);
   } else {
@@ -178,12 +179,12 @@ export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
   const fixtures: FixtureSpec[] = [];
   const spots: SpotSpec[] = [];
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), variantOf(floorMatFor(zone), variant()));
+  const floor = plane(SEG_W, SEG_LEN, variantOf(floorMatFor(zone), variant()));
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, -SEG_LEN / 2);
   group.add(floor);
 
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_LEN), variantOf(ceilMatFor(zone), variant()));
+  const ceil = plane(SEG_W, SEG_LEN, variantOf(ceilMatFor(zone), variant()));
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, SEG_H, -SEG_LEN / 2);
   group.add(ceil);
@@ -237,11 +238,11 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
   const fixtures: FixtureSpec[] = [];
   const spots: SpotSpec[] = [];
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), variantOf(floorMatFor(zone), variant()));
+  const floor = plane(SEG_W, SEG_W, variantOf(floorMatFor(zone), variant()));
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
 
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_W), variantOf(ceilMatFor(zone), variant()));
+  const ceil = plane(SEG_W, SEG_W, variantOf(ceilMatFor(zone), variant()));
   ceil.rotation.x = Math.PI / 2;
   ceil.position.y = SEG_H;
   group.add(ceil);
@@ -251,7 +252,7 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
   (Object.keys(DIRS) as Dir[]).forEach((dir) => {
     if (edgeOpen(i, j, dir)) return;
     closedDirs.push(dir);
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(SEG_W, SEG_H), wallMat);
+    const w = plane(SEG_W, SEG_H, wallMat);
     const { di, dj } = DIRS[dir];
     w.position.set(di * HALF, SEG_H / 2, dj * HALF);
     // 벽이 교차로 안쪽을 보도록 회전
@@ -334,13 +335,13 @@ export function buildThresholdDoorway(group: THREE.Group, zLocal: number): void 
 
   const frameMat = Mat.darkConcrete();
 
-  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(sideW, SEG_H, 0.28), frameMat);
+  const leftWall = boxMesh(sideW, SEG_H, 0.28, frameMat);
   leftWall.position.set(-SEG_W / 2 + sideW / 2, SEG_H / 2, zLocal);
 
-  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(sideW, SEG_H, 0.28), frameMat);
+  const rightWall = boxMesh(sideW, SEG_H, 0.28, frameMat);
   rightWall.position.set(SEG_W / 2 - sideW / 2, SEG_H / 2, zLocal);
 
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorOpenW, topH, 0.28), frameMat);
+  const lintel = boxMesh(doorOpenW, topH, 0.28, frameMat);
   lintel.position.set(0, doorH + topH / 2, zLocal);
   group.add(leftWall, rightWall, lintel);
 
@@ -348,7 +349,7 @@ export function buildThresholdDoorway(group: THREE.Group, zLocal: number): void 
 
   // 반쯤 삐딱하게 열려 있는 낡은 문짝 (원래보다 더 닫히지는 않게 해서 통로를 막지 않음)
   const side = Math.random() < 0.5 ? -1 : 1;
-  const ajarDoor = new THREE.Mesh(new THREE.BoxGeometry(0.85, doorH - 0.04, 0.05), Mat.woodDoor());
+  const ajarDoor = boxMesh(0.85, doorH - 0.04, 0.05, Mat.woodDoor());
   ajarDoor.position.set(side * (-doorOpenW / 2 + 0.22), doorH / 2, zLocal - 0.35);
   ajarDoor.rotation.y = -side * rand(1.12, 1.45);
   group.add(ajarDoor);
@@ -419,7 +420,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         addWallDoor(group, spots, Mat.woodDoor(), -1, z, 0.2, 0.6);
 
         // 복도 쪽 교실 창문 (안쪽은 칠흑, 가끔 희미하게 밝음)
-        const win = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.95), Math.random() < 0.15 ? Mat.dimGlass() : Mat.black());
+        const win = plane(1.8, 0.95, Math.random() < 0.15 ? Mat.dimGlass() : Mat.black());
         win.position.y = 1.55;
         onWall(win, -1, z - 2.1, 0.02);
         group.add(win);
@@ -430,12 +431,12 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       for (let k = 0; k < lockers; k++) {
         const len = rand(1.8, 3.6);
         const z = lockers === 1 ? rand(-5, -11) : k === 0 ? rand(-3, -6) : rand(-10, -13);
-        const locker = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.85, len), Mat.locker());
+        const locker = boxMesh(0.42, 1.85, len, Mat.locker());
         locker.position.set(SEG_W / 2 - 0.22, 0.925, z);
         group.add(locker);
         // 하나만 문이 열린 채
         if (Math.random() < 0.3) {
-          const lid = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1.7, 0.3), Mat.locker());
+          const lid = boxMesh(0.02, 1.7, 0.3, Mat.locker());
           lid.position.set(SEG_W / 2 - 0.5, 0.95, z + rand(-len / 3, len / 3));
           lid.rotation.y = 0.9;
           group.add(lid);
@@ -444,7 +445,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
 
       // 4시 44분 시계
       if (Math.random() < 0.5) {
-        const clock = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.45), Mat.clock());
+        const clock = plane(0.45, 0.45, Mat.clock());
         clock.position.y = 2.45;
         onWall(clock, 1, rand(-9, -14), 0.02);
         group.add(clock);
@@ -453,13 +454,13 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       // 게시판: 빛바랜 종이 몇 장
       if (Math.random() < 0.4) {
         const z = rand(-13, -16);
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9), Mat.plain(0x3a3a38));
+        const board = plane(1.4, 0.9, Mat.plain(0x3a3a38));
         board.position.y = 1.6;
         onWall(board, 1, z, 0.015);
         group.add(board);
         const papers = Math.floor(rand(2, 6));
         for (let k = 0; k < papers; k++) {
-          const paper = new THREE.Mesh(new THREE.PlaneGeometry(rand(0.2, 0.32), rand(0.26, 0.4)), Mat.plain(0xb8b7b0));
+          const paper = plane(rand(0.2, 0.32), rand(0.26, 0.4), Mat.plain(0xb8b7b0));
           paper.position.y = 1.6 + rand(-0.25, 0.25);
           onWall(paper, 1, z + rand(-0.5, 0.5), 0.02);
           paper.rotateZ(rand(-0.12, 0.12));
@@ -508,9 +509,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
 
           // 호수판 (전부 404호, 가끔 떨어져 나감)
           if (Math.random() < 0.9) {
-            const plate = new THREE.Mesh(
-              new THREE.PlaneGeometry(0.28, 0.12),
-              Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true })
+            const plate = plane(0.28, 0.12, Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true })
             );
             plate.position.y = 2.2;
             onWall(plate, side, dz, 0.03);
@@ -521,9 +520,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
           const t = Math.random();
           const talismans = t < 0.4 ? 0 : t < 0.82 ? Math.floor(rand(1, 4)) : Math.floor(rand(9, 15));
           for (let k = 0; k < talismans; k++) {
-            const talisman = new THREE.Mesh(
-              new THREE.PlaneGeometry(0.11, 0.26),
-              Mat.label('勅令', { bg: '#bfbeb6', fg: '#111111', border: true })
+            const talisman = plane(0.11, 0.26, Mat.label('勅令', { bg: '#bfbeb6', fg: '#111111', border: true })
             );
             // 문짝이 아니라 문틀 위·옆 벽에 붙임 (문이 열려도 제자리)
             const above = Math.random() < 0.5;
@@ -567,19 +564,12 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         group.add(u);
       }
 
-      // 복도 입구 벽의 우편함 (칸마다 404호, 꽂힌 채 쌓인 전단지)
+      // 복도 입구 벽에 박힌 우편함 (칸마다 404호, 꽂힌 채 쌓인 전단지)
       if (Math.random() < 0.35) {
-        const side = randSide();
-        const z = rand(-0.9, -1.6);
         const front = plane(0.62, 0.31, Mat.mailbox());
         front.position.y = 1.35;
-        onWall(front, side, z, 0.13);
-        const body = new THREE.Group();
-        const shell = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.31, 0.12), Mat.darkMetal());
-        shell.position.set(0, 1.35, 0.06);
-        body.add(shell);
-        onWall(body, side, z, 0);
-        group.add(front, body);
+        onWall(front, randSide(), rand(-0.9, -1.6), 0.01);
+        group.add(front);
       }
 
       // 문 옆에 내놓은 쓰레기봉투 1~3개
@@ -606,7 +596,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       const step = rand(3.0, 4.2);
       for (let z = -rand(1.5, 3); z > -SEG_LEN + 0.5; z -= step) {
         for (const side of [-1, 1]) {
-          const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, SEG_H, 0.12), Mat.darkWood());
+          const pillar = boxMesh(0.12, SEG_H, 0.12, Mat.darkWood());
           pillar.position.set(side * (SEG_W / 2 - 0.06), SEG_H / 2, z);
           group.add(pillar);
         }
@@ -625,9 +615,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
 
       // 족자: 한 글자
       if (Math.random() < 0.35) {
-        const scroll = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.42, 1.1),
-          Mat.label(pick(['静', '忌', '帰']), { w: 128, h: 320, bg: '#c3c1b8', fg: '#141414', border: true, font: 'bold 96px serif' })
+        const scroll = plane(0.42, 1.1, Mat.label(pick(['静', '忌', '帰']), { w: 128, h: 320, bg: '#c3c1b8', fg: '#141414', border: true, font: 'bold 96px serif' })
         );
         scroll.position.y = 1.75;
         onWall(scroll, Math.random() < 0.5 ? -1 : 1, rand(-5, -14), 0.03);
@@ -639,7 +627,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const side = Math.random() < 0.5 ? -1 : 1;
         const z = rand(-3, KEEP_CLEAR_Z);
         for (let k = 0; k < Math.floor(rand(1, 4)); k++) {
-          const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.07, 0.55), Mat.plain(0x5c5a55));
+          const cushion = boxMesh(0.5, 0.07, 0.55, Mat.plain(0x5c5a55));
           cushion.position.set(side * (HALF - 0.35), 0.035 + k * 0.07, z);
           cushion.rotation.y = rand(-0.2, 0.2);
           group.add(cushion);
@@ -688,7 +676,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         for (const side of [-1, 1]) {
           if (Math.random() > 0.85) continue;
           const len = rand(2.6, 3.4);
-          const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.45, 2.15, len), Mat.vhsShelf());
+          const shelf = boxMesh(0.45, 2.15, len, Mat.vhsShelf());
           shelf.position.set(side * (SEG_W / 2 - 0.24), 1.075, z + rand(-0.3, 0.3));
           group.add(shelf);
         }
@@ -699,7 +687,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const side = Math.random() < 0.5 ? -1 : 1;
         const z = rand(-3, KEEP_CLEAR_Z);
         for (let k = 0; k < Math.floor(rand(3, 7)); k++) {
-          const tape = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.025, 0.1), Mat.plain(0x1c1c1c));
+          const tape = boxMesh(0.19, 0.025, 0.1, Mat.plain(0x1c1c1c));
           tape.position.set(side * rand(HALF - 0.9, HALF - 0.55), 0.013, z + rand(-0.6, 0.6));
           tape.rotation.y = rand(0, Math.PI);
           group.add(tape);
@@ -792,7 +780,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       if (Math.random() < 0.4) {
         for (const z of [rand(-9, -10), rand(-14, -15)]) {
           const s2 = Math.random() < 0.5 ? -1 : 1;
-          const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.3, SEG_H, 0.5), Mat.subwayTile());
+          const pillar = boxMesh(0.3, SEG_H, 0.5, Mat.subwayTile());
           pillar.position.set(s2 * (HALF - 0.15), SEG_H / 2, z);
           group.add(pillar);
         }
@@ -801,11 +789,11 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       if (Math.random() < 0.3) {
         const s3 = -side;
         const z = rand(-4, KEEP_CLEAR_Z);
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 1.6), Mat.metal());
+        const seat = boxMesh(0.4, 0.06, 1.6, Mat.metal());
         seat.position.set(s3 * (HALF - 0.25), 0.45, z);
         group.add(seat);
         for (const dz of [-0.65, 0.65]) {
-          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.05), Mat.darkMetal());
+          const leg = boxMesh(0.05, 0.45, 0.05, Mat.darkMetal());
           leg.position.set(s3 * (HALF - 0.25), 0.225, z + dz);
           group.add(leg);
         }

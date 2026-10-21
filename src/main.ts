@@ -216,8 +216,11 @@ class InescapableHorrorApp {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         document.title = AWAY_TITLES[this.awayTitleIndex++ % AWAY_TITLES.length];
+        // 화면이 꺼지거나 다른 탭으로 가면 영상 디코딩도 멈춤 (배터리)
+        this.ghostClips.pauseAll(true);
       } else {
         document.title = HOME_TITLE;
+        if (!this.isPaused) this.ghostClips.pauseAll(false);
         if (!this.isPaused) {
           this.sound.playCreak(undefined, '[문 닫히는 소리]');
         }
@@ -238,6 +241,11 @@ class InescapableHorrorApp {
 
   private animate(now: number): void {
     requestAnimationFrame((t) => this.animate(t));
+    // 숨겨진 탭에서는 그리지 않음 (대부분 브라우저는 이때 프레임 자체를 멈추지만, 멈추지 않는 환경 대비)
+    if (document.hidden) {
+      this.lastTime = now;
+      return;
+    }
 
     const dt = Math.min(0.1, (now - this.lastTime) / 1000);
     this.lastTime = now;

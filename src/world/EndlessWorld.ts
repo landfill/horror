@@ -104,6 +104,7 @@ export class EndlessWorld {
         seed: Math.random() * 100,
         dead: f.dead ?? false,
         current: f.base,
+        dist: 0,
         mat: f.mat,
       };
     });
