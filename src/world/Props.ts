@@ -34,8 +34,8 @@ function shared<T extends THREE.BufferGeometry>(g: T): T {
   return g;
 }
 const UNIT_BOX = shared(new THREE.BoxGeometry(1, 1, 1));
-// 모바일 부담을 줄이려고 면 수를 적게: 원기둥 8각(32삼각형), 덩어리 20면체(20)
-const UNIT_CYL = shared(new THREE.CylinderGeometry(0.5, 0.5, 1, 8));
+// 모바일 부담을 줄이려고 면 수를 적게: 원기둥 6각(24삼각형), 덩어리 20면체(20)
+const UNIT_CYL = shared(new THREE.CylinderGeometry(0.5, 0.5, 1, 6));
 const UNIT_BLOB = shared(new THREE.IcosahedronGeometry(0.5, 0));
 const UNIT_PLANE = shared(new THREE.PlaneGeometry(1, 1));
 
@@ -160,10 +160,8 @@ export function makeProp(kind: PropKind): THREE.Group {
       break;
     }
     case 'lantern': {
-      // 천장에 매단 종이 등 (원점이 천장)
-      const shade = cyl(0.17, 0.42, Mat.shoji(), 0, -0.55, 0);
-      g.add(shade);
-      g.add(box(0.008, 0.34, 0.008, Mat.darkMetal(), 0, -0.17, 0));
+      // 천장에 붙여 매단 종이 등 (원점이 천장, 메시 하나)
+      g.add(cyl(0.17, 0.42, Mat.shoji(), 0, -0.25, 0));
       break;
     }
     case 'doll': {

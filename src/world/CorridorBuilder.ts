@@ -635,8 +635,8 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       }
 
       // 천장에 매단 종이 등 1~2개 (불은 꺼져 있음, 머리 위로 지나감)
-      if (Math.random() < 0.4) {
-        const n = Math.random() < 0.5 ? 1 : 2;
+      if (Math.random() < 0.3) {
+        const n = Math.random() < 0.7 ? 1 : 2;
         for (let k = 0; k < n; k++) {
           const lantern = makeProp('lantern');
           lantern.position.set(randSide() * rand(0.7, 0.95), SEG_H, rand(-3, -15));
@@ -745,15 +745,12 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
 
     case 'subway': {
       // 환승통로 안내판(출구는 없음), 얼굴 지워진 실종 전단지, 타일 기둥, 벤치
-      // 글씨는 앞·뒷면에만 (옆·위·아랫면은 단색). 영어·일본어·한국어로 몇 초마다 바뀜
+      // 글씨는 앞·뒷면에만, 옆·위·아랫면은 단색. 영어·일본어·한국어로 몇 초마다 바뀜.
+      // 옆면 UV를 모두 판 왼쪽 바탕색 한 점(테두리와 글씨 사이)에 모아 재질 하나·드로콜 하나로 그림
       const signGeo = new THREE.BoxGeometry(1.7, 0.34, 0.08);
-      signGeo.clearGroups();
-      signGeo.addGroup(0, 24, 0); // ±x, ±y 면
-      signGeo.addGroup(24, 12, 1); // ±z 면 (앞·뒤)
-      const sign = new THREE.Mesh(signGeo, [
-        Mat.plain(0x141414),
-        signMaterial(pick(SUBWAY_SIGNS), { w: 512, h: 128, bg: '#141414', fg: '#deded8', border: true }),
-      ]);
+      const uv = signGeo.attributes.uv as THREE.BufferAttribute;
+      for (let k = 0; k < 16; k++) uv.setXY(k, 25 / 512, 0.5); // ±x, ±y 면의 꼭짓점 16개
+      const sign = new THREE.Mesh(signGeo, signMaterial(pick(SUBWAY_SIGNS), { w: 512, h: 128, bg: '#141414', fg: '#deded8', border: true }));
       sign.position.set(0, 2.55, rand(-4, -9));
       group.add(sign);
 
@@ -800,8 +797,8 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       }
 
       // 쓰레기통, 소화기, 젖은 발자국, 타일 벽 손자국
-      if (Math.random() < 0.45) addFloorProp(group, 'trashbin', -side, rand(-2, -6), HALF - 0.26);
-      if (Math.random() < 0.3) addFloorProp(group, 'extinguisher', side, rand(-11, -15), HALF - 0.14);
+      if (Math.random() < 0.3) addFloorProp(group, 'trashbin', -side, rand(-2, -6), HALF - 0.26);
+      if (Math.random() < 0.15) addFloorProp(group, 'extinguisher', side, rand(-11, -15), HALF - 0.14);
       if (Math.random() < 0.3) addFootprints(group, randSide(), rand(-4, -14));
       if (Math.random() < 0.2) addHandprints(group, -side, rand(-7, -15));
       break;
