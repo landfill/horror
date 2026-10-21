@@ -51,7 +51,7 @@ const WALLCLIMB_MAX_TURN = (55 * Math.PI) / 180;
 const WALLCLIMB_HALF_WIDTH = 0.3;
 
 /** 공간별로 나올 수 있는 복도 귀신 (비디오 대여점은 양쪽 진열장에 벽 귀신이 묻혀 제외) */
-const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
+export const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
   school: ['approach', 'floorcrawl', 'ceiling', 'watcher', 'wallcrawl'],
   apt404: ['approach', 'floorcrawl', 'ceiling', 'suspended', 'wallcrawl', 'watcher'],
   tatami: ['approach', 'floorcrawl', 'ceiling', 'crouched', 'wallcrawl'],
@@ -59,14 +59,17 @@ const CORRIDOR_KINDS: Record<ZoneKind, HauntKind[]> = {
   subway: ['approach', 'floorcrawl', 'ceiling', 'wallcrawl', 'watcher'],
 };
 
-/** 출현 비중: 천장·기어오기는 다른 귀신의 3배, 걸어오기는 12배 */
+/**
+ * 출현 비중 (나머지 종류는 1): 천장·기어오기는 5배, 걸어오기는 8배.
+ * 공간마다 다르지만 천장+기어오기가 복도 귀신의 절반쯤 됨 (걸어오기는 약 40%).
+ */
 const KIND_WEIGHT: Partial<Record<HauntKind, number>> = {
-  ceiling: 3,
-  floorcrawl: 3,
-  approach: 12,
+  ceiling: 5,
+  floorcrawl: 5,
+  approach: 8,
 };
 
-function pickWeighted(kinds: HauntKind[]): HauntKind | null {
+export function pickWeighted(kinds: HauntKind[]): HauntKind | null {
   // 실제 영상이 아직 없는(임시 영상뿐인) 귀신은 내보내지 않음
   const usable = kinds.filter((k) => hasRealClip(ROLE[k]));
   if (usable.length === 0) return null;
