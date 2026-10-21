@@ -86,6 +86,168 @@ function drips(c: CanvasRenderingContext2D, w: number, h: number, count: number,
 // 텍스처
 // ---------------------------------------------------------------------------
 
+/** 전단지 변형 수 */
+export const POSTER_VARIANTS = 4;
+
+/** 전단지 판의 가로:세로 (복도에 붙는 평면 0.42 × 0.58과 같은 비율) */
+const POSTER_W = 184;
+const POSTER_H = 254;
+
+type PhotoDraw = (c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) => void;
+
+/**
+ * 실종 전단지 텍스처. 2의 거듭제곱(256×256) 캔버스의 왼쪽 위에 184×254로 그리고
+ * repeat/offset으로 그 부분만 씀 (모바일 GPU에서 밉맵·반복이 안전한 크기).
+ */
+function posterTex(key: string, photo: PhotoDraw): THREE.CanvasTexture {
+  const t = tex(key, 256, 256, (c) => {
+    const w = POSTER_W;
+    const h = POSTER_H;
+    c.fillStyle = '#d5d4cc';
+    c.fillRect(0, 0, 256, 256);
+    c.fillStyle = '#111';
+    c.font = 'bold 36px serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'alphabetic';
+    c.fillText('찾습니다', w / 2, 42);
+    // 사진 칸
+    const px = 28;
+    const py = 56;
+    const pw = w - 56;
+    const ph = 124;
+    c.fillStyle = '#4a4a48';
+    c.fillRect(px, py, pw, ph);
+    c.save();
+    c.beginPath();
+    c.rect(px, py, pw, ph);
+    c.clip();
+    photo(c, px, py, pw, ph);
+    c.restore();
+    // 아래 글줄
+    for (let i = 0; i < 4; i++) {
+      c.fillStyle = '#555';
+      c.fillRect(24, 196 + i * 13, rand(80, 136), 5);
+    }
+    grime(c, w, h, 16, 0.35);
+    drips(c, w, h, 8, 0.4);
+  }, false);
+  t.repeat.set(POSTER_W / 256, POSTER_H / 256);
+  // 캔버스 위쪽이 v=1 (flipY)
+  t.offset.set(0, 1 - POSTER_H / 256);
+  return t;
+}
+
+/**
+ * 흐릿한 귀신 얼굴 사진. 별도 캔버스에 얼굴을 그린 뒤, 조금씩 어긋나게 여러 번 겹쳐 그려 흐리게 만듦
+ * (ctx.filter 블러는 iOS Safari에서 안 될 때가 있음). 그 위에 복사기 줄무늬와 잡티.
+ * v마다 얼굴이 다름: 0 정면·벌린 입 / 1 기울어진 얼굴·짝눈 / 2 너무 가까운 얼굴 / 3 이중 노출
+ */
+function drawGhostPhoto(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, v: number): void {
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const s = off.getContext('2d')!;
+  s.fillStyle = '#3c3c3a';
+  s.fillRect(0, 0, w, h);
+
+  const face = (cx: number, cy: number, r: number, tilt: number, alpha: number, eyeL: number, eyeR: number, mouth: number) => {
+    s.save();
+    s.translate(cx, cy);
+    s.rotate(tilt);
+    s.globalAlpha = alpha;
+    // 창백한 얼굴 (가장자리는 어둠에 묻힘)
+    const g = s.createRadialGradient(0, -r * 0.1, r * 0.15, 0, 0, r * 1.05);
+    g.addColorStop(0, 'rgb(196,196,190)');
+    g.addColorStop(0.65, 'rgb(150,150,145)');
+    g.addColorStop(1, 'rgba(60,60,58,0)');
+    s.fillStyle = g;
+    s.beginPath();
+    s.ellipse(0, 0, r * 0.74, r, 0, 0, Math.PI * 2);
+    s.fill();
+    // 움푹 꺼진 검은 눈구멍 (둘레가 번진 그림자)
+    for (const [ex, k] of [[-0.3, eyeL], [0.3, eyeR]] as const) {
+      const eg = s.createRadialGradient(ex * r, -r * 0.16, 0, ex * r, -r * 0.16, r * 0.27 * k);
+      eg.addColorStop(0, 'rgba(0,0,0,1)');
+      eg.addColorStop(0.55, 'rgba(0,0,0,0.95)');
+      eg.addColorStop(1, 'rgba(0,0,0,0)');
+      s.fillStyle = eg;
+      s.beginPath();
+      s.ellipse(ex * r, -r * 0.16, r * 0.2 * k, r * 0.27 * k, 0, 0, Math.PI * 2);
+      s.fill();
+    }
+    // 길게 벌어진 입
+    const mg = s.createRadialGradient(0, r * 0.45, 0, 0, r * 0.45, r * 0.32 * mouth);
+    mg.addColorStop(0, 'rgba(0,0,0,1)');
+    mg.addColorStop(0.6, 'rgba(0,0,0,0.9)');
+    mg.addColorStop(1, 'rgba(0,0,0,0)');
+    s.fillStyle = mg;
+    s.beginPath();
+    s.ellipse(0, r * 0.45, r * 0.13, r * 0.32 * mouth, 0, 0, Math.PI * 2);
+    s.fill();
+    // 가르마에서 흘러내려 얼굴 가장자리를 덮는 긴 머리카락 (가닥 몇 개는 얼굴을 가로지름)
+    s.strokeStyle = 'rgba(6,6,6,0.85)';
+    s.lineCap = 'round';
+    for (let i = 0; i < 46; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const spread = Math.random();
+      const crossFace = Math.random() < 0.12;
+      const endX = side * r * (crossFace ? rand(0.05, 0.4) : 0.5 + spread * 0.55);
+      s.lineWidth = rand(1.2, 3.2);
+      s.beginPath();
+      s.moveTo(side * rand(0, r * 0.12), -r * 1.02);
+      s.bezierCurveTo(side * r * (0.55 + spread * 0.4), -r * 0.9, endX + side * r * 0.1, r * 0.2, endX, r * rand(1.2, 1.9));
+      s.stroke();
+    }
+    // 정수리
+    s.fillStyle = 'rgba(6,6,6,0.9)';
+    s.beginPath();
+    s.ellipse(0, -r * 0.92, r * 0.62, r * 0.22, 0, 0, Math.PI * 2);
+    s.fill();
+    s.restore();
+  };
+
+  const cx = w / 2;
+  const cy = h * 0.53;
+  const r = h * 0.36;
+  switch (v % POSTER_VARIANTS) {
+    case 0:
+      face(cx, cy, r, 0, 1, 1, 1, 1);
+      break;
+    case 1:
+      face(cx + 6, cy + 3, r, 0.3, 1, 1.35, 0.75, 0.7);
+      break;
+    case 2:
+      face(cx, cy + h * 0.12, h * 0.62, -0.04, 1, 1.15, 1.15, 1.25);
+      break;
+    default:
+      face(cx + 18, cy - 4, r * 0.95, 0.1, 0.45, 1, 1, 1.2);
+      face(cx - 10, cy + 2, r * 0.9, -0.08, 0.9, 1.1, 1.1, 0.9);
+  }
+
+  // 조금씩 어긋나게 겹쳐 그려 흐리게 (지름 약 6px 원형 블러)
+  const taps: [number, number][] = [[0, 0]];
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    taps.push([Math.cos(a) * 3, Math.sin(a) * 3]);
+  }
+  c.save();
+  taps.forEach(([dx, dy], i) => {
+    c.globalAlpha = 1 / (i + 1);
+    c.drawImage(off, x + dx, y + dy);
+  });
+  c.restore();
+  // 복사기 줄무늬, 번짐, 잡티
+  for (let i = 0; i < 7; i++) {
+    c.fillStyle = `rgba(${Math.random() < 0.5 ? '0,0,0' : '230,230,225'},${rand(0.05, 0.16)})`;
+    c.fillRect(x, y + rand(0, h), w, rand(1, 4));
+  }
+  for (let i = 0; i < 260; i++) {
+    const g = Math.random() < 0.5 ? 0 : 230;
+    c.fillStyle = `rgba(${g},${g},${g},${Math.random() * 0.35})`;
+    c.fillRect(x + Math.random() * w, y + Math.random() * h, 1, 1);
+  }
+}
+
 export const Tex = {
   concrete: () =>
     tex('concrete', 256, 256, (c, w, h) => {
@@ -348,31 +510,8 @@ export const Tex = {
       grime(c, w, h, 18, 0.35);
     }),
 
-  poster: () =>
-    tex('poster', 128, 180, (c, w, h) => {
-      c.fillStyle = '#d5d4cc';
-      c.fillRect(0, 0, w, h);
-      c.fillStyle = '#111';
-      c.font = 'bold 26px serif';
-      c.textAlign = 'center';
-      c.fillText('찾습니다', w / 2, 30);
-      // 흐릿한 얼굴 사진 (이목구비 없음)
-      c.fillStyle = '#4a4a48';
-      c.fillRect(24, 42, 80, 86);
-      const g = c.createRadialGradient(64, 82, 4, 64, 82, 36);
-      g.addColorStop(0, 'rgba(200,200,195,0.85)');
-      g.addColorStop(1, 'rgba(60,60,58,0)');
-      c.fillStyle = g;
-      c.fillRect(24, 42, 80, 86);
-      c.fillStyle = 'rgba(0,0,0,0.85)';
-      c.fillRect(24, 42, 80, 26); // 앞머리처럼 덮인 검은 부분
-      for (let i = 0; i < 4; i++) {
-        c.fillStyle = '#555';
-        c.fillRect(18, 140 + i * 9, rand(60, 92), 4);
-      }
-      grime(c, w, h, 16, 0.35);
-      drips(c, w, h, 8, 0.4);
-    }, false),
+  /** 실종 전단지: 사진 자리에 흐릿한 귀신 얼굴. 변형 v = 0 ~ POSTER_VARIANTS-1 */
+  poster: (v: number) => posterTex(`poster:${v}`, (c, x, y, w, h) => drawGhostPhoto(c, x, y, w, h, v)),
 
   clock: () =>
     tex('clock', 128, 128, (c, w, h) => {
@@ -506,29 +645,15 @@ export const Tex = {
 
   /** 실종 전단지의 이상한 판: 얼굴 자리에 뒤통수 (이상 현상용) */
   posterBack: () =>
-    tex('posterBack', 128, 180, (c, w, h) => {
-      c.fillStyle = '#d5d4cc';
-      c.fillRect(0, 0, w, h);
-      c.fillStyle = '#111';
-      c.font = 'bold 26px serif';
-      c.textAlign = 'center';
-      c.fillText('찾습니다', w / 2, 30);
-      c.fillStyle = '#4a4a48';
-      c.fillRect(24, 42, 80, 86);
+    posterTex('posterBack', (c, x, y, w, h) => {
       // 사진 속 사람이 돌아서 있음: 검은 머리카락만
-      const g = c.createRadialGradient(64, 92, 6, 64, 92, 40);
+      const g = c.createRadialGradient(x + w / 2, y + h * 0.58, 8, x + w / 2, y + h * 0.58, w * 0.48);
       g.addColorStop(0, 'rgba(8,8,8,0.95)');
       g.addColorStop(0.75, 'rgba(14,14,14,0.9)');
       g.addColorStop(1, 'rgba(60,60,58,0)');
       c.fillStyle = g;
-      c.fillRect(24, 42, 80, 86);
-      for (let i = 0; i < 4; i++) {
-        c.fillStyle = '#555';
-        c.fillRect(18, 140 + i * 9, rand(60, 92), 4);
-      }
-      grime(c, w, h, 16, 0.35);
-      drips(c, w, h, 8, 0.4);
-    }, false),
+      c.fillRect(x, y, w, h);
+    }),
 
   /** 벽·바닥·천장에 붙이는 얼룩 (투명 배경). 0: 물 샌 자국, 1: 그을음·곰팡이, 2: 흘러내린 자국 */
   stain: (v: number) =>
@@ -728,7 +853,8 @@ export const Mat = {
   vhsShelf: () => lambert('vhsShelf', Tex.vhsShelf),
   metal: () => lambert('metal', Tex.metal),
   locker: () => lambert('locker', Tex.locker),
-  poster: () => lambert('poster', Tex.poster),
+  /** 실종 전단지 (v: 얼굴 변형, 0 ~ POSTER_VARIANTS-1) */
+  poster: (v = 0) => lambert(`poster:${v}`, () => Tex.poster(v)),
   posterBack: () => lambert('posterBack', Tex.posterBack),
   stain: (v: number) =>
     lambert(`stain:${v}`, () => Tex.stain(v), 0xffffff, {

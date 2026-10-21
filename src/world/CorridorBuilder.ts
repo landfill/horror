@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Mat, VARIANT_COUNT, pick, rand, variantOf } from './Textures';
+import { Mat, POSTER_VARIANTS, VARIANT_COUNT, pick, rand, variantOf } from './Textures';
 import { DIRS, Dir, DOOR_WALL_Z, HALF, SEG_H, SEG_LEN, SEG_W, ZoneKind, edgeOpen } from './Maze';
 import {
   DoorUnit,
@@ -728,7 +728,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const n = Math.floor(rand(1, 4));
         const start = rand(-3, -7);
         for (let k = 0; k < n; k++) {
-          const poster = plane(0.4, 0.55, Mat.poster());
+          const poster = plane(0.4, 0.55, Mat.poster(Math.floor(Math.random() * POSTER_VARIANTS)));
           poster.position.y = 2.5;
           onWall(poster, side, start - k * rand(1.6, 2.6), 0.02);
           poster.rotateZ(rand(-0.06, 0.06));
@@ -766,8 +766,9 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       const gap = rand(0.55, 0.75);
       const posters = Math.floor(rand(2, 6));
       const meshes: THREE.Mesh[] = [];
+      const face = Math.floor(Math.random() * POSTER_VARIANTS); // 한 줄은 모두 같은 사람
       for (let k = 0; k < posters; k++) {
-        const poster = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.58), Mat.poster());
+        const poster = plane(0.42, 0.58, Mat.poster(face));
         poster.position.y = 1.48 + rand(-0.04, 0.04);
         onWall(poster, side, start - k * gap, 0.02);
         poster.rotateZ(rand(-0.05, 0.05));
