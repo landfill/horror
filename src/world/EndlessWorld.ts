@@ -25,7 +25,7 @@ import {
 } from './Maze';
 import { Haunts } from './Haunts';
 import { Anomalies } from './Anomalies';
-import { pick, rand } from './Textures';
+import { pick, rand, updateSigns } from './Textures';
 
 const BUILD_RADIUS = 2; // 이 맨해튼 거리 안의 교차로는 생성
 const KEEP_RADIUS = 3; // 이 거리를 넘으면 해제 (경계에서 계속 재생성되지 않게 여유)
@@ -385,8 +385,9 @@ export class EndlessWorld {
       this.mutateTimer = FAST_MUTATE ? 0.3 : ok ? rand(4, 9) : rand(0.8, 1.6);
     }
 
-    // 4. 조명
+    // 4. 조명, 안내판 언어 바뀜
     this.lights.update(elapsed, playerPos.x, playerPos.z);
+    updateSigns(elapsed);
 
     // 5. 다른 테마 공간에 들어서면 가끔 그 공간의 소리
     const { i, j } = nearestNode(playerPos.x, playerPos.z);

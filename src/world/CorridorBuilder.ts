@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Mat, POSTER_VARIANTS, VARIANT_COUNT, pick, rand, variantOf } from './Textures';
+import { Mat, POSTER_VARIANTS, SignPhrases, VARIANT_COUNT, pick, rand, signMaterial, variantOf } from './Textures';
 import { DIRS, Dir, DOOR_WALL_Z, HALF, SEG_H, SEG_LEN, SEG_W, ZoneKind, edgeOpen } from './Maze';
 import {
   DoorUnit,
@@ -361,6 +361,16 @@ function addWallDoor(group: THREE.Group, spots: SpotSpec[], mat: THREE.Material,
   if (Math.random() < anomalyP) spots.push(doorSpot(door, side * (HALF - 0.6), z));
   return door;
 }
+
+/** 지하철 안내판 문구 (영어, 일본어, 한국어 순으로 같은 뜻). 출구는 어디에도 없음 */
+const SUBWAY_SIGNS: SignPhrases[] = [
+  ['← Transfer (No Exit)', '← 乗換通路（出口なし）', '← 환승통로 (출구 없음)'],
+  ['EXIT →', '出口 →', '출구 →'],
+  ['EXIT ↑', '出口 ↑', '출구 ↑'],
+  ['← Exit 4', '← 4番出口', '← 4번 출구'],
+  ['← EXIT　EXIT →', '← 出口　出口 →', '← 출구　출구 →'],
+  ['← Platform (Service Ended)', '← ホーム（運行終了）', '← 승강장 (운행 종료)'],
+];
 
 /** 서로 겹치지 않는 z 자리 몇 개를 고름 (slots 중에서 각 확률 p로) */
 function chooseSlots(slots: number[], p: number, jitter = 0.4): number[] {
@@ -747,16 +757,15 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
 
     case 'subway': {
       // 환승통로 안내판(출구는 없음), 얼굴 지워진 실종 전단지, 타일 기둥, 벤치
-      const sign = new THREE.Mesh(
-        new THREE.BoxGeometry(1.7, 0.34, 0.08),
-        Mat.label(pick(['← 환승통로 (출구 없음)', '出口 →', 'EXIT ↑', '← 4번 출구', '← 出口　出口 →']), {
-          w: 512,
-          h: 128,
-          bg: '#141414',
-          fg: '#deded8',
-          border: true,
-        })
-      );
+      // 글씨는 앞·뒷면에만 (옆·위·아랫면은 단색). 영어·일본어·한국어로 몇 초마다 바뀜
+      const signGeo = new THREE.BoxGeometry(1.7, 0.34, 0.08);
+      signGeo.clearGroups();
+      signGeo.addGroup(0, 24, 0); // ±x, ±y 면
+      signGeo.addGroup(24, 12, 1); // ±z 면 (앞·뒤)
+      const sign = new THREE.Mesh(signGeo, [
+        Mat.plain(0x141414),
+        signMaterial(pick(SUBWAY_SIGNS), { w: 512, h: 128, bg: '#141414', fg: '#deded8', border: true }),
+      ]);
       sign.position.set(0, 2.55, rand(-4, -9));
       group.add(sign);
 

@@ -754,6 +754,33 @@ export interface LabelOptions {
   border?: boolean;
 }
 
+/** 글꼴 목록: 기본 serif에 글자가 없으면 일본어·한국어 글꼴로 */
+const LABEL_FAMILY = 'serif, "Noto Serif JP", "Noto Serif KR"';
+/** 글씨가 판 좌우 가장자리에서 떨어져야 하는 비율 (각각) */
+const LABEL_MARGIN = 0.06;
+
+/**
+ * 글씨가 판 안에 들어오는 글꼴 크기. o.font의 크기(없으면 높이의 55%)에서 시작해
+ * measureText로 폭을 재 좌우 여백(각 6%, 테두리가 있으면 그 안쪽) 안에 들어올 때까지 줄임.
+ */
+function fitLabelFont(c: CanvasRenderingContext2D, text: string, w: number, h: number, o: LabelOptions): string {
+  const base = o.font ?? `bold ${Math.floor(h * 0.55)}px ${LABEL_FAMILY}`;
+  const m = base.match(/(\d+(?:\.\d+)?)px/);
+  let size = m ? Number(m[1]) : Math.floor(h * 0.55);
+  const withSize = (px: number) => (m ? base.replace(m[0], `${px}px`) : base);
+  const inset = o.border ? 12 : 0;
+  const maxW = w * (1 - LABEL_MARGIN * 2) - inset * 2;
+  const maxH = h * 0.78 - inset * 2;
+  size = Math.min(size, Math.floor(maxH));
+  for (let k = 0; k < 6; k++) {
+    c.font = withSize(size);
+    const tw = c.measureText(text).width;
+    if (tw <= maxW || size <= 6) break;
+    size = Math.max(6, Math.floor(size * (maxW / tw) * 0.98));
+  }
+  return withSize(size);
+}
+
 export function labelTex(text: string, o: LabelOptions = {}): THREE.CanvasTexture {
   const w = o.w ?? 256;
   const h = o.h ?? 128;
@@ -770,7 +797,7 @@ export function labelTex(text: string, o: LabelOptions = {}): THREE.CanvasTextur
       c.strokeRect(5, 5, w - 10, h - 10);
     }
     c.fillStyle = o.fg ?? '#cfcfcf';
-    c.font = o.font ?? `bold ${Math.floor(h * 0.55)}px serif`;
+    c.font = fitLabelFont(c, text, w, h, o);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillText(text, w / 2, h / 2 + 2);
@@ -779,6 +806,40 @@ export function labelTex(text: string, o: LabelOptions = {}): THREE.CanvasTextur
       speckle(c, w, h, 300, 0.25);
     }
   }, false);
+}
+
+/**
+ * 영어·일본어·한국어로 번갈아 바뀌는 안내판 글씨.
+ * 문구 묶음마다 재질 하나를 모든 안내판이 함께 쓰고, 몇 초마다 그 재질의 map만 미리 그려 둔 텍스처로 바꿈
+ * (캔버스를 다시 그리지 않고, 재질·셰이더도 그대로).
+ */
+export type SignPhrases = readonly [en: string, ja: string, ko: string];
+const SIGN_SECONDS = 3.5;
+const signBoards = new Map<string, { mat: THREE.MeshLambertMaterial; maps: THREE.Texture[]; phase: number; shown: number }>();
+
+export function signMaterial(phrases: SignPhrases, o: LabelOptions): THREE.MeshLambertMaterial {
+  const key = `${phrases.join('|')}:${JSON.stringify(o)}`;
+  let b = signBoards.get(key);
+  if (!b) {
+    const maps = phrases.map((t) => labelTex(t, o));
+    const shown = Math.floor(Math.random() * maps.length);
+    // 묶음마다 바뀌는 때를 엇갈리게 함 (모든 안내판이 동시에 바뀌지 않게)
+    const phase = Math.random() * SIGN_SECONDS;
+    b = { mat: new THREE.MeshLambertMaterial({ map: maps[shown] }), maps, phase, shown };
+    signBoards.set(key, b);
+  }
+  return b.mat;
+}
+
+/** 매 프레임 호출. 바뀔 때가 된 안내판 재질의 map만 바꿈 */
+export function updateSigns(elapsed: number): void {
+  for (const b of signBoards.values()) {
+    const i = Math.floor((elapsed + b.phase) / SIGN_SECONDS) % b.maps.length;
+    if (i !== b.shown) {
+      b.shown = i;
+      b.mat.map = b.maps[i];
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
