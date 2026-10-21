@@ -22,6 +22,8 @@ export class FirstPersonControls {
   private yaw = 0;
   private pitch = 0;
   private keys: Record<string, boolean> = {};
+  /** 매 프레임 새로 만들지 않도록 재사용 (모바일 GC 끊김 방지) */
+  private euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private isPointerLocked = false;
   private dragging = false;
 
@@ -70,17 +72,14 @@ export class FirstPersonControls {
     return this.yaw;
   }
 
-  public getForwardVector(): THREE.Vector3 {
-    const dir = new THREE.Vector3(0, 0, -1);
-    dir.applyQuaternion(this.camera.quaternion);
-    return dir;
+  /** 카메라가 보는 방향. out을 주면 그 벡터에 담아 돌려줌 (매 프레임 할당 없이 쓰려면 out 사용) */
+  public getForwardVector(out = new THREE.Vector3()): THREE.Vector3 {
+    return out.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
   }
 
   private applyCameraRotation(): void {
-    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
-    euler.x = this.pitch;
-    euler.y = this.yaw;
-    this.camera.quaternion.setFromEuler(euler);
+    this.euler.set(this.pitch, this.yaw, 0, 'YXZ');
+    this.camera.quaternion.setFromEuler(this.euler);
   }
 
   public lockPointer(): void {
@@ -193,11 +192,8 @@ export class FirstPersonControls {
       e.preventDefault();
       const touch = e.changedTouches[0];
       this.joystickTouchId = touch.identifier;
-      const rect = this.joystickZone.getBoundingClientRect();
-      this.joystickOrigin = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      };
+      // 기준점은 처음 닿은 자리: 엄지가 조이스틱 한가운데를 정확히 누르지 않아도 옆으로 새지 않게
+      this.joystickOrigin = { x: touch.clientX, y: touch.clientY };
       this.updateJoystick(touch.clientX, touch.clientY, maxRadius);
     }, { passive: false });
 
@@ -285,11 +281,32 @@ export class FirstPersonControls {
     const knobY = Math.sin(angle) * clampedDist;
     this.joystickKnob.style.transform = `translate(${knobX.toFixed(1)}px, ${knobY.toFixed(1)}px)`;
 
-    const normX = knobX / maxRadius;
-    const normY = knobY / maxRadius;
-
-    this.moveRight = Math.abs(normX) > 0.12 ? normX : 0;
-    this.moveForward = Math.abs(normY) > 0.12 ? -normY : 0;
+    const v = joystickVector(dx, dy, maxRadius);
+    this.moveRight = v.right;
+    this.moveForward = v.forward;
     this.isRunning = dist > maxRadius * 0.92 && this.moveForward > 0.5;
   }
+}
+
+/** 원형 데드존: 기준점에서 이 비율 안쪽은 멈춤 */
+const JOYSTICK_DEAD = 0.18;
+/** 앞·뒤 방향에서 이 각도 안쪽이면 옆 성분을 없애 똑바로 걷게 함 */
+const JOYSTICK_SNAP = (15 * Math.PI) / 180;
+
+/**
+ * 조이스틱 변위(px, 화면 아래가 +y)를 이동 입력으로 바꿈.
+ * - 원형 데드존 밖에서부터 0~1로 다시 늘림 (축별 데드존은 대각선 근처에서 옆걸음이 새어 들어옴)
+ * - 앞·뒤 ±15° 안이면 옆 성분 0
+ */
+export function joystickVector(dx: number, dy: number, maxRadius: number): { forward: number; right: number } {
+  const dist = Math.hypot(dx, dy);
+  const n = Math.min(dist, maxRadius) / maxRadius;
+  if (n < JOYSTICK_DEAD) return { forward: 0, right: 0 };
+  const mag = (n - JOYSTICK_DEAD) / (1 - JOYSTICK_DEAD);
+  // 앞(화면 위)이 0, 오른쪽이 +
+  const a = Math.atan2(dx, -dy);
+  const fromFwd = Math.abs(a);
+  if (fromFwd < JOYSTICK_SNAP) return { forward: mag, right: 0 };
+  if (Math.PI - fromFwd < JOYSTICK_SNAP) return { forward: -mag, right: 0 };
+  return { forward: Math.cos(a) * mag, right: Math.sin(a) * mag };
 }

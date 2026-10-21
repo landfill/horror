@@ -39,6 +39,9 @@ class InescapableHorrorApp {
   private elapsed = 0;
   private lastTime = performance.now();
   private subtitleTimeout: number | null = null;
+  // 매 프레임 쓰는 벡터는 재사용 (모바일에서 GC로 화면이 멈칫하지 않게)
+  private moveVec = new THREE.Vector3();
+  private camForward = new THREE.Vector3();
 
   private hudEl = document.getElementById('hud')!;
   private subtitleBoxEl = document.getElementById('subtitle-box')!;
@@ -154,6 +157,8 @@ class InescapableHorrorApp {
       // iOS 등에서 영상 재생을 허용받으려면 사용자 클릭 안에서 한 번 재생해야 함
       this.ghostClips.unlock();
       this.onTitle = false;
+      // 첫 화면에서 흔들리던 시선을 복도 축에 맞춤 (안 그러면 '앞으로'가 비스듬히 벽 쪽을 향함)
+      this.controls.setOrientation(0, 0);
       this.title.stop();
       startScreen.classList.remove('active');
       this.hudEl.classList.remove('hidden');
@@ -243,19 +248,12 @@ class InescapableHorrorApp {
       // 무겁고 느린 보행 속도 (게임처럼 빠르게 뛰어다닐 수 없음)
       const speed = this.controls.isRunning ? 2.45 : 1.85;
       const yaw = this.controls.getYaw();
-
-      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        yaw
-      );
-      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        yaw
-      );
-
-      const moveVec = new THREE.Vector3();
-      moveVec.addScaledVector(forward, this.controls.moveForward);
-      moveVec.addScaledVector(right, this.controls.moveRight);
+      // 앞 (-sin, -cos), 오른쪽 (cos, -sin): (0,0,-1)·(1,0,0)을 y축으로 yaw만큼 돌린 것과 같음
+      const sin = Math.sin(yaw);
+      const cos = Math.cos(yaw);
+      const f = this.controls.moveForward;
+      const r = this.controls.moveRight;
+      const moveVec = this.moveVec.set(-sin * f + cos * r, 0, -cos * f - sin * r);
 
       const isMoving = moveVec.lengthSq() > 0.001;
       if (isMoving) {
@@ -277,7 +275,7 @@ class InescapableHorrorApp {
       this.sound.updateListener(this.camera);
       this.ghostClips.tick(dt);
 
-      const camForward = this.controls.getForwardVector();
+      const camForward = this.controls.getForwardVector(this.camForward);
       this.world.update(
         dt,
         this.elapsed,
