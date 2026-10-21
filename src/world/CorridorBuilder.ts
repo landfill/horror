@@ -28,6 +28,8 @@ export interface FixtureSpec {
 export interface BuiltPiece {
   group: THREE.Group;
   fixtures: FixtureSpec[];
+  /** 이 구간의 밝기 (만들 때 한 번 정함) */
+  light: SegmentLight;
   /** 이상 현상이 일어날 수 있는 자리 (로컬 좌표) */
   spots: SpotSpec[];
 }
@@ -92,12 +94,44 @@ function addFixture(group: THREE.Group, out: FixtureSpec[], x: number, z: number
   out.push({ x, y: SEG_H - 0.18, z, base, mat, dead });
 }
 
-/** 형광등 상태: 대부분 켜짐, 가끔 흐림·꺼짐 */
-function fixtureState(lightFull: number): { base: number; dead: boolean } {
+/**
+ * 구간(복도 하나·교차로 하나) 밝기.
+ * 너무 어두우면 오히려 무섭지 않으므로 밝은 구간이 더 많음 (밝음 65 : 어두움 35).
+ * 어두운 구간 중 일부만 완전히 깜깜함.
+ */
+export type SegmentLight = 'bright' | 'dark' | 'black';
+/**
+ * 40장짜리 카드 묶음을 섞어 차례로 뽑음: 밝음 26 / 어두움 11 / 깜깜함 3 (= 65 : 35, 깜깜함은 어두운 구간의 약 1/5).
+ * 매번 동전을 던지는 것보다 짧게 걸어도 비율이 지켜지고, 어두운 구간이 길게 이어지는 일이 적음.
+ */
+const LIGHT_DECK: SegmentLight[] = [
+  ...Array<SegmentLight>(26).fill('bright'),
+  ...Array<SegmentLight>(11).fill('dark'),
+  ...Array<SegmentLight>(3).fill('black'),
+];
+let lightDeck: SegmentLight[] = [];
+
+export function chooseSegmentLight(): SegmentLight {
+  if (lightDeck.length === 0) {
+    lightDeck = [...LIGHT_DECK];
+    for (let i = lightDeck.length - 1; i > 0; i--) {
+      const k = Math.floor(Math.random() * (i + 1));
+      [lightDeck[i], lightDeck[k]] = [lightDeck[k], lightDeck[i]];
+    }
+  }
+  return lightDeck.pop()!;
+}
+
+/** 형광등 상태: 밝은 구간은 거의 다 켜짐, 어두운 구간은 흐림·꺼짐 위주 */
+function fixtureState(light: SegmentLight, lightFull: number, first: boolean): { base: number; dead: boolean } {
   const r = Math.random();
-  if (r < 0.14) return { base: lightFull, dead: true };
-  if (r < 0.4) return { base: lightFull * rand(0.3, 0.5), dead: false };
-  return { base: lightFull, dead: false };
+  if (light === 'black') return { base: lightFull, dead: true };
+  if (light === 'bright') {
+    // 첫 등은 늘 환하고, 나머지 중 가끔 조금 흐린 등 (깜빡임은 LightPool이 모든 등에 줌)
+    return !first && r < 0.15 ? { base: lightFull * rand(0.65, 0.8), dead: false } : { base: lightFull, dead: false };
+  }
+  if (r < 0.4) return { base: lightFull, dead: true };
+  return { base: lightFull * rand(0.25, 0.45), dead: false };
 }
 
 /** 복도 벽(side: -1 왼쪽 / 1 오른쪽)에 로컬 평면(앞면 +z)을 붙이는 변환 */
@@ -165,18 +199,19 @@ export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
 
   buildThresholdDoorway(group, DOOR_WALL_Z);
 
-  // 형광등 1~3개, 위치·상태가 복도마다 다름
+  // 형광등 개수·위치·상태가 복도마다 다름. 밝은 복도는 2~3개, 어두운 복도는 1~2개
+  const light = chooseSegmentLight();
   const r = Math.random();
-  const count = r < 0.15 ? 1 : r < 0.75 ? 2 : 3;
-  const darkCorridor = Math.random() < 0.06;
+  const count = light === 'bright' ? (r < 0.55 ? 2 : 3) : r < 0.45 ? 1 : 2;
   for (let k = 0; k < count; k++) {
     const z = -SEG_LEN * ((k + 0.5) / count) + rand(-1.2, 1.2);
-    const st = fixtureState(lightFull);
-    addFixture(group, fixtures, 0, z, st.base, darkCorridor || st.dead, Math.random() < 0.1);
+    const st = fixtureState(light, lightFull, k === 0);
+    addFixture(group, fixtures, 0, z, st.base, st.dead, Math.random() < 0.1);
   }
-  // 전부 꺼진 복도는 드물게만 (6%)
-  if (!darkCorridor && fixtures.every((f) => f.dead)) {
+  // 깜깜한 구간이 아니면 적어도 하나는 켜져 있음
+  if (light === 'dark' && fixtures.every((f) => f.dead)) {
     fixtures[0].dead = false;
+    fixtures[0].base = lightFull * rand(0.25, 0.45);
     fixtures[0].mat.color.setHex(0xd8d8d2);
   }
 
@@ -189,7 +224,7 @@ export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
   }
 
   populateZoneDetails(group, zone, spots);
-  return { group, fixtures, spots };
+  return { group, fixtures, spots, light };
 }
 
 /**
@@ -232,9 +267,10 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
     }
   });
 
-  // 교차로 조명은 대체로 흐림. 가끔 완전히 꺼져 있는 교차로도 있음.
-  const r = Math.random();
-  if (r > 0.2) addFixture(group, fixtures, 0, 0, r > 0.7 ? lightFull * 0.7 : lightFull * 0.3, false, Math.random() < 0.08);
+  // 교차로 등 하나: 밝은 교차로는 거의 다 켜짐, 어두운 교차로는 흐림, 깜깜한 교차로는 등이 없음
+  const light = chooseSegmentLight();
+  if (light === 'bright') addFixture(group, fixtures, 0, 0, lightFull * rand(0.85, 1), false, Math.random() < 0.08);
+  else if (light === 'dark') addFixture(group, fixtures, 0, 0, lightFull * rand(0.2, 0.35), false, Math.random() < 0.08);
 
   addStains(group, Math.floor(rand(0, 2.6)), SEG_W, HALF, false);
   if (Math.random() < 0.12) {
@@ -276,7 +312,7 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
     });
   }
 
-  return { group, fixtures, spots };
+  return { group, fixtures, spots, light };
 }
 
 function doorSpot(door: DoorUnit, x: number, z: number): SpotSpec {
