@@ -9,12 +9,53 @@ import { SEG_H } from './Maze';
  * 사물의 원점은 바닥, 앞면은 +z 방향입니다.
  */
 
-export type PropKind = 'chair' | 'shoes' | 'bucket' | 'box' | 'umbrella' | 'stool';
-export const LANDMARK_KINDS: PropKind[] = ['chair', 'shoes', 'bucket', 'box', 'umbrella', 'stool'];
+export type PropKind =
+  | 'chair'
+  | 'shoes'
+  | 'bucket'
+  | 'box'
+  | 'umbrella'
+  | 'stool'
+  | 'extinguisher'
+  | 'trashbin'
+  | 'bag'
+  | 'cart'
+  | 'lantern'
+  | 'doll';
+export const LANDMARK_KINDS: PropKind[] = ['chair', 'shoes', 'bucket', 'box', 'umbrella', 'stool', 'bag'];
+
+/**
+ * 크기 1짜리 공유 지오메트리. 소품마다 새로 만들지 않고 scale로 크기를 맞춤
+ * (끝없이 생성·해제되는 구간에서 지오메트리 생성·GPU 업로드를 줄임).
+ * userData.shared가 붙은 지오메트리는 구간을 해제할 때 지우지 않음.
+ */
+function shared<T extends THREE.BufferGeometry>(g: T): T {
+  g.userData.shared = true;
+  return g;
+}
+const UNIT_BOX = shared(new THREE.BoxGeometry(1, 1, 1));
+const UNIT_CYL = shared(new THREE.CylinderGeometry(0.5, 0.5, 1, 10));
+const UNIT_BLOB = shared(new THREE.IcosahedronGeometry(0.5, 1));
+const UNIT_PLANE = shared(new THREE.PlaneGeometry(1, 1));
 
 function box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const m = new THREE.Mesh(UNIT_BOX, mat);
+  m.scale.set(w, h, d);
   m.position.set(x, y, z);
+  return m;
+}
+
+function cyl(r: number, h: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
+  const m = new THREE.Mesh(UNIT_CYL, mat);
+  m.scale.set(r * 2, h, r * 2);
+  m.position.set(x, y, z);
+  return m;
+}
+
+/** 공유 평면 (가로 w, 세로 h). 앞면 +z */
+export function plane(w: number, h: number, mat: THREE.Material): THREE.Mesh {
+  const m = new THREE.Mesh(UNIT_PLANE, mat);
+  m.scale.set(w, h, 1);
   return m;
 }
 
@@ -82,6 +123,56 @@ export function makeProp(kind: PropKind): THREE.Group {
         leg.rotation.x = -Math.sin(a) * 0.08;
         g.add(leg);
       }
+      break;
+    }
+    case 'extinguisher': {
+      // 벽 앞 바닥에 세워 둔 소화기
+      const body = Mat.plain(0x4c4c4a);
+      g.add(cyl(0.08, 0.46, body, 0, 0.23, 0));
+      g.add(box(0.05, 0.07, 0.05, Mat.darkMetal(), 0, 0.5, 0));
+      g.add(box(0.02, 0.3, 0.02, Mat.plain(0x1a1a1a), 0.07, 0.32, 0.04));
+      break;
+    }
+    case 'trashbin': {
+      // 둥근 쓰레기통 (안은 칠흑)
+      g.add(cyl(0.22, 0.72, Mat.metal(), 0, 0.36, 0));
+      const inside = plane(0.3, 0.3, Mat.black());
+      inside.rotation.x = -Math.PI / 2;
+      inside.position.y = 0.722;
+      g.add(inside);
+      break;
+    }
+    case 'bag': {
+      // 묶어 둔 검은 쓰레기봉투
+      const bag = new THREE.Mesh(UNIT_BLOB, Mat.plain(0x161616));
+      bag.scale.set(rand(0.4, 0.5), rand(0.32, 0.42), rand(0.36, 0.46));
+      bag.position.y = bag.scale.y / 2 - 0.02;
+      bag.rotation.y = rand(0, Math.PI);
+      g.add(bag);
+      break;
+    }
+    case 'cart': {
+      // 비디오 반납 카트: 몸통, 위에 쌓인 테이프, 바퀴 받침
+      g.add(box(0.5, 0.55, 0.8, Mat.darkMetal(), 0, 0.42, 0));
+      g.add(box(0.42, 0.1, 0.7, Mat.vhsShelf(), 0, 0.745, 0));
+      g.add(box(0.46, 0.06, 0.76, Mat.plain(0x1a1a1a), 0, 0.06, 0));
+      break;
+    }
+    case 'lantern': {
+      // 천장에 매단 종이 등 (원점이 천장)
+      const shade = cyl(0.17, 0.42, Mat.shoji(), 0, -0.55, 0);
+      g.add(shade);
+      g.add(box(0.008, 0.34, 0.008, Mat.darkMetal(), 0, -0.17, 0));
+      break;
+    }
+    case 'doll': {
+      // 벽에 기대 앉은 일본 인형: 기모노 몸통, 창백한 얼굴, 검은 단발
+      g.add(box(0.24, 0.26, 0.16, Mat.plain(0x2e2c2a), 0, 0.13, 0));
+      const head = new THREE.Mesh(UNIT_BLOB, Mat.plain(0xd2d1cb));
+      head.scale.setScalar(0.15);
+      head.position.set(0, 0.34, 0.01);
+      g.add(head);
+      g.add(box(0.17, 0.16, 0.12, Mat.plain(0x0c0c0c), 0, 0.37, -0.025));
       break;
     }
   }

@@ -99,8 +99,14 @@ export function setEdgeOpen(e: EdgeRef, open: boolean): void {
 
 // 테마: 3x3 구역 단위. 구역이 통째로 잊히면 다시 정해짐.
 const regionTheme = new Map<string, ZoneKind>();
+/** ?zone=subway : 모든 곳을 한 테마로 (확인용) */
+const FORCE_ZONE = ((): ZoneKind | null => {
+  const z = new URLSearchParams(location.search).get('zone');
+  return ZONE_KINDS.includes(z as ZoneKind) ? (z as ZoneKind) : null;
+})();
 
 export function zoneOf(i: number, j: number): ZoneKind {
+  if (FORCE_ZONE) return FORCE_ZONE;
   const ri = Math.floor(i / REGION);
   const rj = Math.floor(j / REGION);
   const k = `${ri},${rj}`;

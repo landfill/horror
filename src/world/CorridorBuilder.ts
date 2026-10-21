@@ -11,6 +11,7 @@ import {
   makeStain,
   makeSwingDoor,
   makeTV,
+  plane,
 } from './Props';
 import type { SpotSpec } from './Anomalies';
 
@@ -366,6 +367,40 @@ function chooseSlots(slots: number[], p: number, jitter = 0.4): number[] {
   return slots.filter(() => Math.random() < p).map((z) => z + rand(-jitter, jitter));
 }
 
+/** 벽에 손자국 (side 쪽 벽, 높이는 사람 손이 닿는 곳) */
+function addHandprints(group: THREE.Group, side: number, z: number): void {
+  const m = plane(rand(0.7, 1.0), rand(0.7, 1.0), Mat.decal('handprints'));
+  m.renderOrder = 1;
+  m.position.y = rand(0.9, 1.5);
+  onWall(m, side, z, 0.008);
+  group.add(m);
+}
+
+/**
+ * 바닥의 젖은 맨발 자국 한 줄. 복도를 따라 걷다가 벽(towardSide 쪽)으로 꺾여 들어가 끊김
+ * (벽 속으로 걸어 들어간 것처럼).
+ */
+function addFootprints(group: THREE.Group, towardSide: number, z: number): void {
+  const m = plane(0.55, 1.1, Mat.decal('footprints'));
+  m.renderOrder = 1;
+  m.rotation.x = -Math.PI / 2;
+  // 텍스처의 '위'(걸어가는 쪽)가 -z(복도 안쪽)를 향하고, 벽 쪽으로 비스듬히
+  m.rotation.z = -towardSide * rand(0.25, 0.5);
+  m.position.set(towardSide * (HALF - 0.75), 0.007, z);
+  group.add(m);
+}
+
+/** 바닥 소품을 벽에 붙여 놓음 (복도 쪽을 봄) */
+function addFloorProp(group: THREE.Group, kind: PropKind, side: number, z: number, inset = WALL_PROP_X): THREE.Group {
+  const p = makeProp(kind);
+  placeOnFloor(p, side, z, 'corridor');
+  p.position.x = side * inset;
+  group.add(p);
+  return p;
+}
+
+const randSide = () => (Math.random() < 0.5 ? -1 : 1);
+
 export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: SpotSpec[]): void {
   switch (zone) {
     case 'school': {
@@ -427,13 +462,27 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const chair = makeProp('chair');
         const side = Math.random() < 0.5 ? -1 : 1;
         const z = rand(-4, KEEP_CLEAR_Z);
-        const facesWall = Math.random() < 0.15;
-        placeOnFloor(chair, side, z, facesWall ? 'wall' : 'corridor');
+        const r = Math.random();
+        const facesWall = r < 0.15;
+        const fallen = r > 0.7;
+        placeOnFloor(chair, side, z, facesWall ? 'wall' : fallen ? 'along' : 'corridor');
+        if (fallen) {
+          // 옆으로 쓰러진 의자 (등받이가 벽 쪽)
+          chair.rotation.z = side * Math.PI / 2;
+          chair.position.y = 0.21;
+          chair.position.x = side * (HALF - 0.45);
+        }
         group.add(chair);
-        if (!facesWall) {
+        if (!facesWall && !fallen) {
           spots.push({ x: side * WALL_PROP_X, z, kind: 'chair', apply: () => placeOnFloor(chair, side, z, 'wall') });
         }
       }
+
+      // 소화기 (사물함 없는 왼쪽 벽, 교실 문과 겹치지 않는 자리)
+      if (Math.random() < 0.5) addFloorProp(group, 'extinguisher', -1, pick([-6.2, -11.6, -16.2]) + rand(-0.2, 0.2), HALF - 0.14);
+      // 교실 창문 옆 손자국, 교실 문으로 이어지는 젖은 발자국
+      if (Math.random() < 0.3) addHandprints(group, -1, rand(-5, -16));
+      if (Math.random() < 0.3) addFootprints(group, -1, rand(-4, -14));
       break;
     }
 
@@ -507,6 +556,38 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         u.position.x = side * (HALF - 0.25);
         group.add(u);
       }
+
+      // 복도 입구 벽의 우편함 (칸마다 404호, 꽂힌 채 쌓인 전단지)
+      if (Math.random() < 0.35) {
+        const side = randSide();
+        const z = rand(-0.9, -1.6);
+        const front = plane(0.62, 0.31, Mat.mailbox());
+        front.position.y = 1.35;
+        onWall(front, side, z, 0.13);
+        const body = new THREE.Group();
+        const shell = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.31, 0.12), Mat.darkMetal());
+        shell.position.set(0, 1.35, 0.06);
+        body.add(shell);
+        onWall(body, side, z, 0);
+        group.add(front, body);
+      }
+
+      // 문 옆에 내놓은 쓰레기봉투 1~3개
+      if (doors.length > 0 && Math.random() < 0.35) {
+        const d = pick(doors);
+        const n = Math.floor(rand(1, 4));
+        for (let k = 0; k < n; k++) {
+          const z = d.z + 0.75 + k * 0.42;
+          if (z > -0.6 || z < KEEP_CLEAR_Z) continue;
+          addFloorProp(group, 'bag', d.side, z, HALF - 0.3);
+        }
+      }
+      if (Math.random() < 0.25) addHandprints(group, randSide(), rand(-3, -15));
+      if (doors.length > 0 && Math.random() < 0.25) {
+        // 어느 철문 앞에서 끝나는 젖은 발자국
+        const d = pick(doors);
+        addFootprints(group, d.side, d.z + 1.0);
+      }
       break;
     }
 
@@ -554,6 +635,40 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
           group.add(cushion);
         }
       }
+
+      // 천장에 매단 종이 등 1~2개 (불은 꺼져 있음, 머리 위로 지나감)
+      if (Math.random() < 0.4) {
+        const n = Math.random() < 0.5 ? 1 : 2;
+        for (let k = 0; k < n; k++) {
+          const lantern = makeProp('lantern');
+          lantern.position.set(randSide() * rand(0.7, 0.95), SEG_H, rand(-3, -15));
+          group.add(lantern);
+        }
+      }
+
+      // 벽에 기대 앉은 인형. 처음엔 벽을 보고 있다가, 다시 보면 복도 쪽을 보고 있기도 함
+      if (Math.random() < 0.2) {
+        const side = randSide();
+        const z = rand(-3, KEEP_CLEAR_Z);
+        const facesWall = Math.random() < 0.6;
+        const doll = addFloorProp(group, 'doll', side, z, HALF - 0.2);
+        if (facesWall) {
+          placeOnFloor(doll, side, z, 'wall');
+          doll.position.x = side * (HALF - 0.2);
+          spots.push({
+            x: side * (HALF - 0.6),
+            z,
+            kind: 'doll',
+            apply: () => {
+              placeOnFloor(doll, side, z, 'corridor');
+              doll.position.x = side * (HALF - 0.2);
+            },
+          });
+        }
+      }
+
+      if (Math.random() < 0.3) addHandprints(group, randSide(), rand(-3, -15));
+      if (Math.random() < 0.25) addFootprints(group, randSide(), rand(-4, -14));
       break;
     }
 
@@ -606,6 +721,27 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         group.add(tv.group);
         if (!on) spots.push({ x: tv.group.position.x, z, kind: 'tv', apply: () => tv.setOn(true) });
       }
+
+      // 진열장 위 벽에 붙은 영화 포스터 (흐릿한 얼굴)
+      if (Math.random() < 0.5) {
+        const side = randSide();
+        const n = Math.floor(rand(1, 4));
+        const start = rand(-3, -7);
+        for (let k = 0; k < n; k++) {
+          const poster = plane(0.4, 0.55, Mat.poster());
+          poster.position.y = 2.5;
+          onWall(poster, side, start - k * rand(1.6, 2.6), 0.02);
+          poster.rotateZ(rand(-0.06, 0.06));
+          group.add(poster);
+        }
+      }
+      // 반납 카트 (복도 가운데를 막지 않게 벽 쪽 진열장 틈)
+      if (Math.random() < 0.35) {
+        const cart = addFloorProp(group, 'cart', randSide(), pick([-6.5, -11.5]) + rand(-0.3, 0.3), HALF - 0.8);
+        cart.rotation.y += Math.PI / 2 + rand(-0.2, 0.2);
+      }
+      if (Math.random() < 0.15) addHandprints(group, randSide(), rand(-3, -15));
+      if (Math.random() < 0.15) addFootprints(group, randSide(), rand(-4, -14));
       break;
     }
 
@@ -664,6 +800,12 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
           group.add(leg);
         }
       }
+
+      // 쓰레기통, 소화기, 젖은 발자국, 타일 벽 손자국
+      if (Math.random() < 0.45) addFloorProp(group, 'trashbin', -side, rand(-2, -6), HALF - 0.26);
+      if (Math.random() < 0.3) addFloorProp(group, 'extinguisher', side, rand(-11, -15), HALF - 0.14);
+      if (Math.random() < 0.3) addFootprints(group, randSide(), rand(-4, -14));
+      if (Math.random() < 0.2) addHandprints(group, -side, rand(-7, -15));
       break;
     }
   }

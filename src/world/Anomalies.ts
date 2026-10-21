@@ -20,11 +20,12 @@ import { pick, rand } from './Textures';
  * - tv       : 꺼져 있던 TV가 켜져 있음
  * - poster   : 줄지어 붙은 같은 전단지 중 하나만 사진 속 사람이 돌아서 있음
  * - shoes    : 문 앞에 없던 실내화가 가지런히 놓여 있음
+ * - doll     : 벽을 보고 앉아 있던 인형이 복도 쪽을 보고 있음
  * - echo     : 앞서 본 교차로의 사물이 다음 교차로 같은 자리에도 놓여 있음
  * - lights   : 등 뒤의 형광등이 먼 것부터 하나씩 꺼짐
  */
 
-export type AnomalyKind = 'door' | 'chair' | 'tv' | 'poster' | 'shoes' | 'echo' | 'landmark';
+export type AnomalyKind = 'door' | 'chair' | 'tv' | 'poster' | 'shoes' | 'doll' | 'echo' | 'landmark';
 
 /** 빌더가 만드는 이상 현상 자리 (조각 로컬 좌표) */
 export interface SpotSpec {

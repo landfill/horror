@@ -399,6 +399,111 @@ export const Tex = {
       grime(c, w, h, 6, 0.3);
     }, false),
 
+  /** 벽에 찍힌 손자국 몇 개 (일부는 끌린 자국). 배경은 투명 */
+  handprints: () =>
+    tex('handprints', 256, 256, (c, w, h) => {
+      c.clearRect(0, 0, w, h);
+      const n = Math.floor(rand(3, 6));
+      for (let i = 0; i < n; i++) {
+        const x = rand(40, w - 40);
+        const y = rand(50, h - 40);
+        const s = rand(0.75, 1.05);
+        const a = rand(0.45, 0.8);
+        c.save();
+        c.translate(x, y);
+        c.rotate(rand(-0.5, 0.5));
+        c.scale(s, s);
+        c.fillStyle = `rgba(12,12,12,${a})`;
+        // 손바닥
+        c.beginPath();
+        c.ellipse(0, 10, 15, 18, 0, 0, Math.PI * 2);
+        c.fill();
+        // 손가락 네 개 + 엄지
+        for (const [fx, fy, len, rot] of [[-11, -14, 22, -0.12], [-3, -18, 26, -0.03], [5, -17, 25, 0.05], [12, -12, 19, 0.16], [-19, 6, 15, -0.9]]) {
+          c.save();
+          c.translate(fx, fy);
+          c.rotate(rot);
+          c.beginPath();
+          c.ellipse(0, -len / 2 + 6, 3.6, len / 2, 0, 0, Math.PI * 2);
+          c.fill();
+          c.restore();
+        }
+        // 아래로 끌린 자국
+        if (Math.random() < 0.5) {
+          const g = c.createLinearGradient(0, 20, 0, 20 + rand(30, 70));
+          g.addColorStop(0, `rgba(12,12,12,${a * 0.7})`);
+          g.addColorStop(1, 'rgba(12,12,12,0)');
+          c.fillStyle = g;
+          for (let k = -2; k <= 2; k++) c.fillRect(k * 6 - 1.5, 20, 3, 70);
+        }
+        c.restore();
+      }
+      speckle(c, w, h, 400, 0.15);
+    }, false),
+
+  /** 젖은 맨발 자국 세 걸음 (아래에서 위로 걸어감). 배경은 투명. 0.55m × 1.1m 평면에 붙임 */
+  footprints: () =>
+    tex('footprints', 128, 256, (c, w, h) => {
+      c.clearRect(0, 0, w, h);
+      const steps = 3;
+      for (let i = 0; i < steps; i++) {
+        const left = i % 2 === 0;
+        const x = w / 2 + (left ? -22 : 22) + rand(-3, 3);
+        const y = h - 50 - i * 78;
+        const a = 0.82 - i * 0.14; // 갈수록 옅어짐
+        c.save();
+        c.translate(x, y);
+        c.rotate(rand(-0.1, 0.1) + (left ? -0.08 : 0.08));
+        c.scale(1.6, 1.6);
+        c.fillStyle = `rgba(8,8,8,${a})`;
+        c.beginPath();
+        c.ellipse(0, 0, 7, 12, 0, 0, Math.PI * 2); // 앞꿈치
+        c.fill();
+        c.beginPath();
+        c.ellipse(0, 15, 5.5, 7, 0, 0, Math.PI * 2); // 뒤꿈치
+        c.fill();
+        for (let t = 0; t < 5; t++) {
+          c.beginPath();
+          c.arc((left ? 1 : -1) * (t * 2.6 - 5), -14 + Math.abs(t - 1) * 0.7, t === 0 ? 2.6 : 1.8, 0, Math.PI * 2);
+          c.fill();
+        }
+        c.restore();
+      }
+    }, false),
+
+  /** 아파트 우편함 앞면: 칸마다 404호, 전단지가 삐져나옴 */
+  mailbox: () =>
+    tex('mailbox', 256, 128, (c, w, h) => {
+      c.fillStyle = '#4a4a47';
+      c.fillRect(0, 0, w, h);
+      const cols = 4;
+      const rows = 2;
+      const cw = w / cols;
+      const ch = h / rows;
+      c.font = 'bold 13px sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const px = x * cw;
+          const py = y * ch;
+          c.fillStyle = '#5c5c58';
+          c.fillRect(px + 4, py + 4, cw - 8, ch - 8);
+          c.fillStyle = '#101010';
+          c.fillRect(px + 12, py + 24, cw - 24, 6); // 투입구
+          c.fillStyle = '#cfcfca';
+          c.fillText('404', px + cw / 2, py + 14);
+          if (Math.random() < 0.55) {
+            // 꽂힌 채 쌓인 전단지
+            c.fillStyle = '#c8c8c2';
+            c.fillRect(px + rand(14, 24), py + 18, rand(16, 28), 10);
+          }
+        }
+      }
+      grime(c, w, h, 16, 0.4);
+      drips(c, w, h, 6, 0.35);
+    }, false),
+
   /** 실종 전단지의 이상한 판: 얼굴 자리에 뒤통수 (이상 현상용) */
   posterBack: () =>
     tex('posterBack', 128, 180, (c, w, h) => {
@@ -641,6 +746,16 @@ export const Mat = {
   darkMetal: () => lambert('darkMetal', null, 0x2a2a2a),
   plain: (v: number) => lambert(`plain:${v}`, null, v),
   black: () => basic('black', 0x000000),
+  /** 벽·바닥에 붙이는 투명 자국 (손자국, 발자국) */
+  decal: (name: 'handprints' | 'footprints') =>
+    lambert(`decal:${name}`, Tex[name], 0xffffff, {
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
+    }),
+  mailbox: () => lambert('mailbox', Tex.mailbox),
   label: (text: string, o: LabelOptions = {}) =>
     lambert(`labelmat:${text}:${JSON.stringify(o)}`, () => labelTex(text, o), 0xffffff, o.bg ? {} : { transparent: true, alphaTest: 0.1 }),
 };
