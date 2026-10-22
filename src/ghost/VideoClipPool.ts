@@ -126,7 +126,7 @@ export class ClipEntry {
  * 나머지는 메타데이터만 받아 두었다가, 쓰려고 할 때나 게임이 조용할 때 하나씩 미리 받습니다.
  * (영상 7개 약 32MB를 처음에 한꺼번에 받으면 모바일에서 데이터·메모리 부담이 큼)
  */
-const EAGER_IDS = new Set(['approach', 'jointsback', 'ceiling', 'crawling']);
+const EAGER_IDS = new Set(['approach', 'smiling', 'ceiling', 'crawling']);
 /** 게임을 시작하고 이만큼 지난 뒤부터 나머지 영상을 하나씩 미리 받음 (초) */
 const PREFETCH_AFTER = 12;
 

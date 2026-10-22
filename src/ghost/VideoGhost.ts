@@ -126,6 +126,7 @@ export interface VideoGhostOptions {
 export class VideoGhost {
   public readonly root = new THREE.Group();
   public readonly role: GhostRole;
+  public readonly approachSpeedMps?: number;
   /** 외부에서 서서히 나타나기/사라지기에 사용 (0~1) */
   public opacity = 1;
 
@@ -151,6 +152,7 @@ export class VideoGhost {
     this.pool = pool;
     this.billboardOn = opts.billboard ?? true;
     this.clip = clipForRole(role);
+    this.approachSpeedMps = this.clip?.approachSpeedMps;
     this.hangs = this.clip?.hangV !== undefined;
     // 매달린 영상은 옆모습이라 항상 플레이어를 향해야 함
     if (this.hangs) this.billboardOn = true;

@@ -623,7 +623,7 @@ export class Haunts {
     const g = h.ghost!;
     const pl = worldToCorridor(h.frame!, this.camPos.x, this.camPos.z);
     if (this.inCorridorView(pl) && dist < 16 && dist > 1.4) {
-      const speed = h.kind === 'floorcrawl' ? 0.18 : 0.24;
+      const speed = h.kind === 'floorcrawl' ? 0.18 : (g.approachSpeedMps ?? 0.24);
       h.lz += Math.sign(pl.lz - h.lz) * speed * dt;
       g.setReversed(h.kind === 'approach');
       this.syncCorridorGhost(h);

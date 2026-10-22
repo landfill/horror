@@ -38,6 +38,8 @@ export interface GhostClip {
   roles: GhostRole[];
   /** 끊김 연출 기본 프레임레이트. 낮을수록 동작이 뚝뚝 끊깁니다. 0이면 원본 그대로. */
   stepFps: number;
+  /** 다가오기 이동 속도(m/s). 생략하면 연출의 기본 속도를 사용. */
+  approachSpeedMps?: number;
   /** 임시 영상 여부 (실제 촬영본이 들어오면 삭제) */
   placeholder?: boolean;
 }
@@ -111,21 +113,19 @@ export const GHOST_CLIPS: GhostClip[] = [
     stepFps: 12,
   },
   {
-    // Flow(Veo) 생성본. 진흙 묻은 양복 차림의 남자가 관절을 꺾으며 뒤로 걸어 멀어지는 영상.
-    // 0.6~4.6초를 거꾸로 틀어 다가오게 함 (뒤로 걸은 걸음을 역재생해 어색하게 다가옴). 기존 approach 영상과 무작위로 번갈아 나옴.
-    // 원본: ghost-raw/approach_joints_backward_20261020234109.mp4
-    // 역재생: ffmpeg -ss 0.6 -t 4.0 -i <원본> -vf reverse -an -c:v libx264 -crf 8 -pix_fmt yuv444p ghost-raw/jointsback_rev.mp4
-    // 크기 고정: python scripts/stabilize-ghost-clip.py ghost-raw/jointsback_rev.mp4 ghost-raw/jointsback_stable.mp4 --cover 90x90
-    // 변환: scripts/make-ghost-clip.sh ghost-raw/jointsback_stable.mp4 jointsback --height 1280 --fps 24
-    // (--loopfade는 반복 연결부 자세 차이가 커서 몸에 구멍이 뚫려 보이므로 쓰지 않음)
-    id: 'jointsback',
-    src: '/ghosts/jointsback.mp4',
+    // Flow(Veo) 생성본. 제자리에서 웃는 어린 귀신. 기존 approach 영상과 무작위로 번갈아 나옴.
+    // 원본: ghost-raw/Ghost_character_smiling_on_green…_20261022222213.mp4
+    // 변환: scripts/make-ghost-clip.sh <원본> smiling --cover 90x90 --height 1280 --fps 24
+    // 원본의 체형과 동작을 유지하며, 성인 크기에 맞추는 크기 보정이나 역재생은 하지 않음.
+    id: 'smiling',
+    src: '/ghosts/smiling.mp4',
     aspect: 0.5594,
-    // 인물이 프레임 높이의 약 87%를 차지 → 키 약 1.75m
-    frameHeightM: 2.0,
-    footV: 0.04,
+    // 인물이 프레임 높이의 약 90%를 차지 → 어린 귀신의 키 약 1.3m
+    frameHeightM: 1.45,
+    footV: 0.045,
     roles: ['approach'],
     stepFps: 12,
+    approachSpeedMps: 0.08,
   },
   {
     // Flow(Veo) 생성본. 원본: ghost-raw/crawling_test_720p.mp4
