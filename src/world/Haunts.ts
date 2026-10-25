@@ -191,6 +191,9 @@ export class Haunts {
   // 출현 보장: 귀신을 못 보고 지나간 복도 수
   private lastCorridor: string | null = null;
   private corridorsSinceGhost = 0;
+  /** 지금 복도에 들어온 교차로, 마지막으로 있던 교차로 ("i,j") */
+  private corridorEntry: string | null = null;
+  private lastJunction: string | null = null;
   private swapTimer = 0;
 
   private camPos = new THREE.Vector3();
@@ -417,14 +420,21 @@ export class Haunts {
     const a = this.active;
     if (!a || a.everSeen || !a.ghost) return;
     if (this.inFront(this.center(a))) return;
-    if (!this.candidates().some((c) => c.front)) return;
-    this.release(a);
-    a.unseenTime = 0;
-    this.tryActivate();
-    // 앞쪽 어디에도 자리를 못 잡았으면 원래 귀신을 그대로 둠
-    if (!this.active && !a.ghost && this.place(a)) {
-      if (this.isSeen(this.center(a))) this.release(a);
-      else this.active = a;
+    // 앞쪽 자리를 실제로 잡았을 때만 옮김 (못 잡으면 원래 귀신과 그 타이머를 그대로 둠)
+    const fronts = this.candidates()
+      .filter((c) => c.front)
+      .slice(0, ACTIVATE_TRIES);
+    for (const { h } of fronts) {
+      if (!this.place(h)) continue;
+      if (this.isSeen(this.center(h))) {
+        this.release(h);
+        continue;
+      }
+      this.release(a);
+      a.unseenTime = 0;
+      this.active = h;
+      h.voiceTimer = rand(...PRESENCE_VOICE_FIRST);
+      return;
     }
   }
 
@@ -734,8 +744,18 @@ export class Haunts {
 
   private trackCorridor(): void {
     const key = this.currentCorridor();
-    if (!key || key === this.lastCorridor) return;
+    if (!key) {
+      // 복도를 끝까지 지나 반대쪽 교차로에 닿았으면, 같은 복도로 되돌아가도 새로 셈
+      // (들어온 교차로로 도로 나간 것은 세지 않음)
+      const { i, j } = nearestNode(this.camPos.x, this.camPos.z);
+      const junction = `${i},${j}`;
+      if (this.lastCorridor && junction !== this.corridorEntry) this.lastCorridor = null;
+      this.lastJunction = junction;
+      return;
+    }
+    if (key === this.lastCorridor) return;
     this.lastCorridor = key;
+    this.corridorEntry = this.lastJunction;
     this.corridorsSinceGhost++;
   }
 
