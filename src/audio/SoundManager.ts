@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GhostVoiceTag, VOICE_FILES, pickVoiceKind, synthGhostVoice, voiceGroupId, voiceSubtitle } from './GhostVoice';
 
 export interface SpatialPos {
   x: number;
@@ -23,6 +24,8 @@ export class SoundManager {
   private isMuted = false;
   private isHumCut = false;
   private subtitleCallback?: (text: string, reversed?: boolean) => void;
+  /** 귀신 목소리 녹음 파일 (경로 → 디코딩된 소리). 못 불러온 파일은 null */
+  private voiceBuffers = new Map<string, AudioBuffer | null>();
 
   public setSubtitleHandler(cb: (text: string, reversed?: boolean) => void): void {
     this.subtitleCallback = cb;
@@ -51,6 +54,26 @@ export class SoundManager {
 
     this.setupReverb();
     this.startAmbientHum();
+    this.loadVoiceFiles();
+  }
+
+  /** VOICE_FILES에 적힌 녹음 파일을 미리 받아 둠 (실패하면 합성 목소리를 씀) */
+  private loadVoiceFiles(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    for (const group of Object.values(VOICE_FILES)) {
+      for (const list of Object.values(group ?? {})) {
+        for (const url of list ?? []) {
+          if (this.voiceBuffers.has(url)) continue;
+          this.voiceBuffers.set(url, null);
+          fetch(url)
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
+            .then((data) => ctx.decodeAudioData(data))
+            .then((buf) => this.voiceBuffers.set(url, buf))
+            .catch(() => console.warn(`[voice] 불러오지 못함: ${url}`));
+        }
+      }
+    }
   }
 
   public resume(): void {
@@ -312,6 +335,36 @@ export class SoundManager {
       osc.start(t);
       osc.stop(t + 0.042);
     }
+  }
+
+  /**
+   * 귀신 목소리 (성별·나이대에 맞는 웃음/울음/흐느낌/속삭임).
+   * 녹음 파일이 있으면 그것을, 없으면 합성 목소리를 냅니다.
+   * 목소리 정보가 없는 귀신은 목 긁는 소리로 대신합니다.
+   */
+  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos): void {
+    if (!this.ctx || this.isMuted) return;
+    if (!tag) {
+      this.playDeathRattle(pos);
+      return;
+    }
+    const kind = pickVoiceKind(tag);
+    const dest = this.createPanner(pos);
+    this.emitSubtitle(voiceSubtitle(tag, kind));
+
+    const files = (VOICE_FILES[voiceGroupId(tag)]?.[kind] ?? [])
+      .map((url) => this.voiceBuffers.get(url))
+      .filter((b): b is AudioBuffer => !!b);
+    if (files.length > 0) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = files[Math.floor(Math.random() * files.length)];
+      // 매번 조금씩 다르게 들리도록 높이를 살짝 흔듦
+      src.playbackRate.value = 0.94 + Math.random() * 0.1;
+      src.connect(dest);
+      src.start();
+      return;
+    }
+    synthGhostVoice(this.ctx, dest, tag, kind);
   }
 
   /**

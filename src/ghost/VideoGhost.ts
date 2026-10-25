@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GhostFigure, GhostPose } from '../world/GhostFigure';
+import type { GhostVoiceTag } from '../audio/GhostVoice';
 import { GhostClip, GhostRole, clipForRole } from './clips';
 import { ClipEntry, VideoClipPool } from './VideoClipPool';
 
@@ -127,6 +128,8 @@ export class VideoGhost {
   public readonly root = new THREE.Group();
   public readonly role: GhostRole;
   public readonly approachSpeedMps?: number;
+  /** 영상 속 인물의 성별·나이에 맞는 목소리 (태그가 없으면 undefined) */
+  public readonly voice?: GhostVoiceTag;
   /** 외부에서 서서히 나타나기/사라지기에 사용 (0~1) */
   public opacity = 1;
 
@@ -153,6 +156,9 @@ export class VideoGhost {
     this.billboardOn = opts.billboard ?? true;
     this.clip = clipForRole(role);
     this.approachSpeedMps = this.clip?.approachSpeedMps;
+    if (this.clip?.gender && this.clip.age) {
+      this.voice = { gender: this.clip.gender, age: this.clip.age, kinds: this.clip.voices };
+    }
     this.hangs = this.clip?.hangV !== undefined;
     // 매달린 영상은 옆모습이라 항상 플레이어를 향해야 함
     if (this.hangs) this.billboardOn = true;

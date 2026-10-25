@@ -17,6 +17,13 @@ export type GhostRole =
   /** 벽을 기어감 (바닥을 기는 배우를 위에서 촬영해 벽에 붙임) */
   | 'wallcrawl';
 
+/** 귀신 목소리 구분용: 영상 속 인물의 성별 */
+export type GhostGender = 'female' | 'male';
+/** 귀신 목소리 구분용: 영상 속 인물의 나이대 */
+export type GhostAge = 'child' | 'adult' | 'elderly';
+/** 귀신이 내는 사람 목소리 종류 */
+export type VoiceKind = 'laugh' | 'cry' | 'sob' | 'whisper';
+
 export interface GhostClip {
   id: string;
   /** stacked-alpha MP4 경로 (위=색상, 아래=투명도) */
@@ -40,6 +47,12 @@ export interface GhostClip {
   stepFps: number;
   /** 다가오기 이동 속도(m/s). 생략하면 연출의 기본 속도를 사용. */
   approachSpeedMps?: number;
+  /** 영상 속 인물의 성별. 목소리 효과음을 고를 때 씀 (없으면 목 긁는 소리) */
+  gender?: GhostGender;
+  /** 영상 속 인물의 나이대. 목소리 효과음을 고를 때 씀 */
+  age?: GhostAge;
+  /** 이 귀신에 어울리는 목소리 종류 (생략하면 그 성별·나이대의 기본 목록) */
+  voices?: VoiceKind[];
   /** 임시 영상 여부 (실제 촬영본이 들어오면 삭제) */
   placeholder?: boolean;
 }
@@ -56,6 +69,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.8,
     footV: 0.04,
     roles: ['peeking'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['whisper', 'laugh'],
     stepFps: 12,
   },
   {
@@ -69,6 +85,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.2,
     footV: 0.04,
     roles: ['crouched'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['sob', 'cry'],
     stepFps: 12,
   },
   {
@@ -83,6 +102,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     footV: 0,
     hangV: 0.11,
     roles: ['ceiling'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['laugh', 'whisper'],
     stepFps: 12,
   },
   {
@@ -95,6 +117,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.92,
     footV: 0.05,
     roles: ['wallcrawl'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['laugh', 'cry'],
     stepFps: 12,
   },
   {
@@ -110,6 +135,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.92,
     footV: 0.07,
     roles: ['approach'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['cry', 'sob'],
     stepFps: 12,
   },
   {
@@ -124,6 +152,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.45,
     footV: 0.045,
     roles: ['approach'],
+    gender: 'male',
+    age: 'child',
+    voices: ['laugh'],
     stepFps: 12,
     approachSpeedMps: 0.08,
   },
@@ -139,6 +170,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     // 손·무릎이 바닥에 닿는 높이 (프레임 아래에서 약 17%)
     footV: 0.17,
     roles: ['crawling'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['sob', 'laugh'],
     stepFps: 12,
   },
   {
@@ -151,6 +185,9 @@ export const GHOST_CLIPS: GhostClip[] = [
     frameHeightM: 1.94,
     footV: 0.06,
     roles: ['standing'],
+    gender: 'female',
+    age: 'adult',
+    voices: ['whisper', 'cry'],
     stepFps: 12,
   },
   {
