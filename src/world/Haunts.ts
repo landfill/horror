@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SoundManager } from '../audio/SoundManager';
-import { GhostRole, hasRealClip } from '../ghost/clips';
+import type { GhostVoiceTag } from '../audio/GhostVoice';
+import { GhostClip, GhostRole, clipForRole, hasRealClip } from '../ghost/clips';
 import { VideoGhost } from '../ghost/VideoGhost';
 import { VideoClipPool } from '../ghost/VideoClipPool';
 import { LIGHT_FULL, LightPool } from './Lighting';
@@ -104,6 +105,20 @@ const FOLLOWER_FIRST: [number, number] = [15, 25];
 const FOLLOWER_AFTER_JOLT: [number, number] = [25, 40];
 const FOLLOWER_AFTER_GIVEUP: [number, number] = [15, 25];
 
+/**
+ * 출현 보장: 귀신을 못 본 채 지나간 복도가 이 수에 이르기 전에 반드시 하나는 나오게 함.
+ * (4 = 복도 4개마다 최소 1번) 3번째 복도부터 쉬는 시간을 무시하고, 이미 끝난 귀신도
+ * 다시 배치해 앞쪽 복도에서 나오게 하며, 4번째 복도에서는 등 뒤 추적자도 바로 부름.
+ */
+const GUARANTEE_EVERY = 4;
+/** 이 각도(약 60도) 안쪽이면 '앞쪽' 자리로 봄 */
+const FRONT_COS = 0.5;
+/** 한 번에 자리 잡기를 시도해 볼 후보 수 */
+const ACTIVATE_TRIES = 3;
+/** 귀신이 나와 있는 동안 그 목소리가 들리는 간격(초). 멀리서도 들림 (가까이 가지 않아도 됨) */
+const PRESENCE_VOICE_FIRST: [number, number] = [0.8, 2];
+const PRESENCE_VOICE_EVERY: [number, number] = [5, 9];
+
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
   watcher: 'standing',
@@ -141,6 +156,10 @@ interface Haunt {
   minDist: number;
   soundTimer: number;
   cued: boolean;
+  /** 이 귀신이 쓸 영상 (미리 정해 두어 나타나기 전 목소리와 실제 모습이 맞게 함) */
+  clip?: GhostClip;
+  /** 다음 목소리까지 남은 시간 (나와 있는 동안) */
+  voiceTimer: number;
 }
 
 interface Crumb {
@@ -168,6 +187,14 @@ export class Haunts {
   private followerStage = 0;
   private followerTimer = FORCE === 'follower' ? 3 : DEBUG ? 20 : rand(...FOLLOWER_FIRST);
   private followerWasSeen = false;
+
+  // 출현 보장: 귀신을 못 보고 지나간 복도 수
+  private lastCorridor: string | null = null;
+  private corridorsSinceGhost = 0;
+  /** 지금 복도에 들어온 교차로, 마지막으로 있던 교차로 ("i,j") */
+  private corridorEntry: string | null = null;
+  private lastJunction: string | null = null;
+  private swapTimer = 0;
 
   private camPos = new THREE.Vector3();
   private lastSeenDebug: object = {};
@@ -233,6 +260,8 @@ export class Haunts {
       minDist: Infinity,
       soundTimer: 0,
       cued: false,
+      clip: clipForRole(ROLE[kind]),
+      voiceTimer: rand(...PRESENCE_VOICE_FIRST),
       ...extra,
     };
   }
@@ -356,32 +385,75 @@ export class Haunts {
     return near(i, j) || near(bi, bj);
   }
 
-  private tryActivate(): void {
-    let best: Haunt | null = null;
-    let bestD = Infinity;
+  /**
+   * 플레이어가 바라보는 쪽(앞)에 있고 벽에 가리지 않은 자리인지. 곁가지 복도에 먼저 자리를 잡으면
+   * 곧장 걸어가는 플레이어는 끝내 못 보고, 그동안 다른 귀신도 못 나오기 때문에 앞쪽을 우선함.
+   */
+  private inFront(p: THREE.Vector3): boolean {
+    const dx = p.x - this.camPos.x;
+    const dz = p.z - this.camPos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1e-3) return true;
+    const fl = Math.hypot(this.camFwd.x, this.camFwd.z) || 1;
+    if ((dx * this.camFwd.x + dz * this.camFwd.z) / (d * fl) < FRONT_COS) return false;
+    // 비스듬히 앞이어도 벽 너머 옆 복도면 곧장 걸어서는 못 봄
+    return hasLineOfSight(this.camPos.x, this.camPos.z, p.x, p.z);
+  }
+
+  /** 다음에 나올 후보들: 앞쪽 자리 먼저, 그 안에서는 가까운 순 */
+  private candidates(): { h: Haunt; front: boolean }[] {
+    const list: { h: Haunt; front: boolean; d: number }[] = [];
     for (const h of this.haunts) {
       if (h.done || h.ghost) continue;
       if (!this.onPlayersWay(h)) continue;
       const anchor = this.anchorPreview(h);
       if (!anchor) continue;
       const d = this.flatDist(anchor);
-      if (d < ACTIVATE_DIST && d > 3 && d < bestD) {
-        best = h;
-        bestD = d;
+      if (d >= ACTIVATE_DIST || d <= 3) continue;
+      list.push({ h, front: this.inFront(anchor), d });
+    }
+    return list.sort((a, b) => Number(b.front) - Number(a.front) || a.d - b.d);
+  }
+
+  /** 아직 아무도 못 본 채 옆쪽에 자리 잡은 귀신이 있고 앞쪽에 후보가 생기면 그쪽으로 옮김 */
+  private maybeSwapToFront(): void {
+    const a = this.active;
+    if (!a || a.everSeen || !a.ghost) return;
+    if (this.inFront(this.center(a))) return;
+    // 앞쪽 자리를 실제로 잡았을 때만 옮김 (못 잡으면 원래 귀신과 그 타이머를 그대로 둠)
+    const fronts = this.candidates()
+      .filter((c) => c.front)
+      .slice(0, ACTIVATE_TRIES);
+    for (const { h } of fronts) {
+      if (!this.place(h)) continue;
+      if (this.isSeen(this.center(h))) {
+        this.release(h);
+        continue;
       }
-    }
-    if (!best) return;
-    if (!this.place(best)) {
-      this.cooldown = 0.5;
+      this.release(a);
+      a.unseenTime = 0;
+      this.active = h;
+      h.voiceTimer = rand(...PRESENCE_VOICE_FIRST);
       return;
     }
-    if (this.isSeen(this.center(best))) {
-      // 보이는 곳에서 갑자기 생기면 안 됨 → 잠시 뒤 다시 시도
-      this.release(best);
-      this.cooldown = 1;
+  }
+
+  private tryActivate(): void {
+    // 가장 좋은 자리가 지금 시야 안이라 못 나오면 다음 후보를 시도 (한 번에 몇 개까지만)
+    const list = this.candidates().slice(0, ACTIVATE_TRIES);
+    if (list.length === 0) return;
+    for (const { h } of list) {
+      if (!this.place(h)) continue;
+      if (this.isSeen(this.center(h))) {
+        // 보이는 곳에서 갑자기 생기면 안 됨
+        this.release(h);
+        continue;
+      }
+      this.active = h;
+      h.voiceTimer = rand(...PRESENCE_VOICE_FIRST);
       return;
     }
-    this.active = best;
+    this.cooldown = Math.max(this.cooldown, 0.5);
   }
 
   /** 대략적인 위치 (활성화 거리 판정용) */
@@ -412,7 +484,7 @@ export class Haunts {
     let g: VideoGhost;
     switch (h.kind) {
       case 'ceiling': {
-        g = new VideoGhost(role, this.pool, { billboard: false, shadow: false });
+        g = new VideoGhost(role, this.pool, { clip: h.clip, billboard: false, shadow: false });
         h.lx = rand(-0.4, 0.4);
         h.lz = mid();
         // 위에서 찍은 영상은 천장에 눕힘 (얼굴이 아래를 향하고, 머리는 복도 시작(+z) 쪽).
@@ -421,7 +493,7 @@ export class Haunts {
         break;
       }
       case 'wallcrawl': {
-        g = new VideoGhost(role, this.pool, { billboard: false, shadow: false });
+        g = new VideoGhost(role, this.pool, { clip: h.clip, billboard: false, shadow: false });
         h.lz = far();
         h.lx = h.side * (HALF - 0.03);
         // 바닥 가까이에서 오르기 시작
@@ -429,19 +501,19 @@ export class Haunts {
         break;
       }
       case 'crouched': {
-        g = new VideoGhost(role, this.pool);
+        g = new VideoGhost(role, this.pool, { clip: h.clip });
         h.lz = far();
         h.lx = h.side * (HALF - 0.45);
         break;
       }
       case 'suspended': {
-        g = new VideoGhost(role, this.pool, { shadow: false });
+        g = new VideoGhost(role, this.pool, { clip: h.clip, shadow: false });
         h.lz = mid();
         h.lx = rand(-0.3, 0.3);
         break;
       }
       default: {
-        g = new VideoGhost(role, this.pool);
+        g = new VideoGhost(role, this.pool, { clip: h.clip });
         h.lz = far();
         h.lx = rand(-0.35, 0.35);
       }
@@ -483,7 +555,7 @@ export class Haunts {
     h.peekDir = { x: d.di, z: d.dj };
     // 교차로 조명이 꺼져 있거나 흐리면 문틀 너머 어둠에 묻혀 안 보이므로 켜 둠
     this.lights.ensureLit(c.x, c.z, LIGHT_FULL * 0.6);
-    const g = new VideoGhost(ROLE.peek, this.pool);
+    const g = new VideoGhost(ROLE.peek, this.pool, { clip: h.clip });
     g.root.position.set(x, 0, z);
     // 영상 속 귀신은 화면 왼쪽(복도 가운데 쪽)으로 몸을 기울임.
     // 플레이어가 볼 때 귀신이 왼쪽 모퉁이에 있으면 좌우를 뒤집어 항상 가운데 쪽으로 내다보게 함.
@@ -548,6 +620,14 @@ export class Haunts {
     this.camFwd.copy(camForward).normalize();
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recordCrumb(playerPos);
+    this.trackCorridor();
+    const overdue = !DEBUG && !FORCE && this.corridorsSinceGhost >= GUARANTEE_EVERY - 1;
+    if (overdue) {
+      this.cooldown = Math.min(this.cooldown, 1);
+      this.rearmOnPlayersWay();
+      // 4번째 복도인데도 아직이면 등 뒤 추적자도 바로 부름
+      if (this.corridorsSinceGhost >= GUARANTEE_EVERY) this.followerTimer = Math.min(this.followerTimer, 1);
+    }
 
     // 귀신 자리는 두 개: 등 뒤의 추적자 하나 + 앞쪽 복도·모퉁이 귀신 하나 (서로 막지 않음)
     // 1. 추적자
@@ -559,6 +639,13 @@ export class Haunts {
 
     // 2. 복도·모퉁이 귀신
     if (!this.active && this.cooldown <= 0) this.tryActivate();
+    else if (this.active) {
+      this.swapTimer -= dt;
+      if (this.swapTimer <= 0) {
+        this.swapTimer = 0.5;
+        this.maybeSwapToFront();
+      }
+    }
 
     // 3. 행동
     if (this.active) this.step(this.active, dt, elapsed, isMoving);
@@ -575,6 +662,7 @@ export class Haunts {
     if (seen) {
       h.seenTime += dt;
       h.unseenTime = 0;
+      if (!h.everSeen) this.corridorsSinceGhost = 0; // 귀신을 봄 → 출현 보장 카운트 초기화
       h.everSeen = true;
     } else {
       h.unseenTime += dt;
@@ -616,6 +704,83 @@ export class Haunts {
 
     if (h.ghost) {
       h.ghost.update(dt, elapsed, { cameraPos: this.camPos, light: this.lights.lightAt(c.x, c.y, c.z) });
+      if (h.kind !== 'follower') this.presenceVoice(h, dt, c);
+    }
+  }
+
+  /**
+   * 귀신이 나와 있는 동안 가끔 그 귀신의 목소리(성별·나이에 맞는 웃음/울음 등)를 냄.
+   * 거리 감쇠를 약하게 해서 같은 복도 어디서든, 옆 복도에서도 희미하게 들림.
+   * (추적자는 들키면 안 되므로 발소리만 냄)
+   */
+  private presenceVoice(h: Haunt, dt: number, c: THREE.Vector3): void {
+    h.voiceTimer -= dt;
+    if (h.voiceTimer > 0) return;
+    h.voiceTimer = rand(...PRESENCE_VOICE_EVERY);
+    this.sound.playGhostVoice(this.voiceOf(h), { x: c.x, y: Math.min(c.y + 0.6, SEG_H), z: c.z }, true);
+  }
+
+  private voiceOf(h: Haunt): GhostVoiceTag | undefined {
+    if (h.ghost) return h.ghost.voice;
+    const clip = h.clip;
+    return clip?.gender && clip.age ? { gender: clip.gender, age: clip.age, kinds: clip.voices } : undefined;
+  }
+
+  // -------------------------------------------------------------------------
+  // 출현 보장 (복도 4개마다 최소 1번)
+  // -------------------------------------------------------------------------
+
+  /** 플레이어가 있는 복도의 키 (EndlessWorld의 cKey와 같은 형식). 교차로 안이면 null */
+  private currentCorridor(): string | null {
+    const { i, j } = nearestNode(this.camPos.x, this.camPos.z);
+    const c = nodeCenter(i, j);
+    const dx = this.camPos.x - c.x;
+    const dz = this.camPos.z - c.z;
+    if (Math.abs(dx) <= HALF && Math.abs(dz) <= HALF) return null;
+    // 각 교차로는 자기 N(-z) 복도와 E(+x) 복도를 소유
+    if (Math.abs(dz) > Math.abs(dx)) return dz < 0 ? `C:${i},${j},N` : `C:${i},${j + 1},N`;
+    return dx > 0 ? `C:${i},${j},E` : `C:${i - 1},${j},E`;
+  }
+
+  private trackCorridor(): void {
+    const key = this.currentCorridor();
+    if (!key) {
+      // 복도를 끝까지 지나 반대쪽 교차로에 닿았으면, 같은 복도로 되돌아가도 새로 셈
+      // (들어온 교차로로 도로 나간 것은 세지 않음)
+      const { i, j } = nearestNode(this.camPos.x, this.camPos.z);
+      const junction = `${i},${j}`;
+      if (this.lastCorridor && junction !== this.corridorEntry) this.lastCorridor = null;
+      this.lastJunction = junction;
+      return;
+    }
+    if (key === this.lastCorridor) return;
+    this.lastCorridor = key;
+    this.corridorEntry = this.lastJunction;
+    this.corridorsSinceGhost++;
+  }
+
+  /** 플레이어가 곧 지나갈 곳의 이미 끝난 귀신을 다시 배치 (같은 복도를 오가도 나오게) */
+  private rearmOnPlayersWay(): void {
+    for (const h of this.haunts) {
+      if (!h.done || h.ghost || h.kind === 'follower') continue;
+      if (!this.onPlayersWay(h)) continue;
+      const kind = h.kind === 'peek' || !h.zone ? h.kind : pickWeighted(CORRIDOR_KINDS[h.zone]) ?? h.kind;
+      Object.assign(h, {
+        kind,
+        done: false,
+        lx: 0,
+        lz: -12,
+        ly: 0,
+        seenTime: 0,
+        unseenTime: 0,
+        everSeen: false,
+        moved: 0,
+        minDist: Infinity,
+        soundTimer: 0,
+        cued: false,
+        clip: clipForRole(ROLE[kind]),
+        voiceTimer: rand(...PRESENCE_VOICE_FIRST),
+      });
     }
   }
 
@@ -793,7 +958,7 @@ export class Haunts {
   private startFollower(s: number): void {
     const p = this.pointAt(s);
     const h = this.newHaunt('follower', 'follower', {});
-    const g = new VideoGhost(ROLE.follower, this.pool);
+    const g = new VideoGhost(ROLE.follower, this.pool, { clip: h.clip });
     g.root.position.set(p.x, 0, p.z);
     h.ghost = g;
     if (this.isSeen(this.center(h))) {
@@ -874,6 +1039,7 @@ export class Haunts {
       seen: this.lastSeenDebug,
       cam: { p: this.camPos.toArray().map((v) => +v.toFixed(2)), f: this.camFwd.toArray().map((v) => +v.toFixed(2)) },
       count: this.haunts.filter((x) => !x.done).length,
+      corridorsSinceGhost: this.corridorsSinceGhost,
       node: nearestNode(this.camPos.x, this.camPos.z),
     };
   }

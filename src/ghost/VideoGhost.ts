@@ -116,6 +116,8 @@ export interface VideoGhostOptions {
   billboard?: boolean;
   /** 발밑 접지 그림자 (기본 true) */
   shadow?: boolean;
+  /** 쓸 영상을 미리 정해 둔 경우 (나타나기 전부터 목소리를 맞추려고). 없으면 역할로 고름 */
+  clip?: GhostClip;
 }
 
 /**
@@ -154,7 +156,7 @@ export class VideoGhost {
     this.role = role;
     this.pool = pool;
     this.billboardOn = opts.billboard ?? true;
-    this.clip = clipForRole(role);
+    this.clip = opts.clip ?? clipForRole(role);
     this.approachSpeedMps = this.clip?.approachSpeedMps;
     if (this.clip?.gender && this.clip.age) {
       this.voice = { gender: this.clip.gender, age: this.clip.age, kinds: this.clip.voices };
