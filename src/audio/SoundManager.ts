@@ -162,7 +162,11 @@ export class SoundManager {
     wet.connect(this.masterGain);
   }
 
-  private createPanner(pos?: SpatialPos): AudioNode {
+  /**
+   * far = true면 멀리서도 들리게 거리 감쇠를 약하게 함 (복도 끝 18m에서도 절반 크기쯤).
+   * 귀신이 있는 구역 어디서든 그 귀신의 목소리가 들리게 할 때 씀.
+   */
+  private createPanner(pos?: SpatialPos, far = false): AudioNode {
     if (!this.ctx || !this.masterGain) {
       throw new Error('SoundManager not initialized');
     }
@@ -172,9 +176,9 @@ export class SoundManager {
     const panner = this.ctx.createPanner();
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
-    panner.refDistance = 1.5;
-    panner.maxDistance = 30;
-    panner.rolloffFactor = 1.4;
+    panner.refDistance = far ? 6 : 1.5;
+    panner.maxDistance = far ? 60 : 30;
+    panner.rolloffFactor = far ? 0.5 : 1.4;
     panner.positionX.setValueAtTime(pos.x, this.ctx.currentTime);
     panner.positionY.setValueAtTime(pos.y, this.ctx.currentTime);
     panner.positionZ.setValueAtTime(pos.z, this.ctx.currentTime);
@@ -312,10 +316,10 @@ export class SoundManager {
   /**
    * 주온 스타일 목에서 나는 "으으으… 딸깍딸깍" 래틀 소리
    */
-  public playDeathRattle(pos?: SpatialPos): void {
+  public playDeathRattle(pos?: SpatialPos, far = false): void {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
-    const dest = this.createPanner(pos);
+    const dest = this.createPanner(pos, far);
     this.emitSubtitle('[목에서 긁히는 소리]');
 
     const clicks = 14;
@@ -342,14 +346,14 @@ export class SoundManager {
    * 녹음 파일이 있으면 그것을, 없으면 합성 목소리를 냅니다.
    * 목소리 정보가 없는 귀신은 목 긁는 소리로 대신합니다.
    */
-  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos): void {
+  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false): void {
     if (!this.ctx || this.isMuted) return;
     if (!tag) {
-      this.playDeathRattle(pos);
+      this.playDeathRattle(pos, far);
       return;
     }
     const kind = pickVoiceKind(tag);
-    const dest = this.createPanner(pos);
+    const dest = this.createPanner(pos, far);
     this.emitSubtitle(voiceSubtitle(tag, kind));
 
     const files = (VOICE_FILES[voiceGroupId(tag)]?.[kind] ?? [])
