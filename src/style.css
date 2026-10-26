@@ -405,6 +405,28 @@ html, body {
   display: flex;
 }
 
+/* 일시정지 창 맨 아래 효과음 출처: 눈에 띄지 않게 작고 흐리게 */
+.credits {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+
+.credits a {
+  color: var(--ink-dim);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+
+.credits a:hover {
+  color: var(--ink);
+}
+
 /* HUD */
 .hud {
   position: fixed;
