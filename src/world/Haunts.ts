@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SoundManager } from '../audio/SoundManager';
-import type { GhostVoiceTag } from '../audio/GhostVoice';
+import { GhostVoiceTag, pickVoiceKind } from '../audio/GhostVoice';
 import { GhostClip, GhostRole, clipForRole, hasRealClip } from '../ghost/clips';
 import { VideoGhost } from '../ghost/VideoGhost';
 import { VideoClipPool } from '../ghost/VideoClipPool';
@@ -120,6 +120,12 @@ const PRESENCE_VOICE_FIRST: [number, number] = [0.8, 2];
 const PRESENCE_VOICE_EVERY: [number, number] = [5, 9];
 /** 나와 있는 동안 들리는 목소리 크기 (마주칠 때보다 작고 얕게) */
 const PRESENCE_VOICE_VOLUME = 0.55;
+/**
+ * 키득거림·흐느낌은 자주 나면 금방 익숙해져서 덜 무서움. 차례가 와도 이 확률로만 내고,
+ * 다음 차례까지 더 오래 쉼 (평균 약 25초에 한 번). "꺼거걱"은 PRESENCE_VOICE_EVERY 그대로.
+ */
+const SOFT_VOICE_CHANCE = 0.5;
+const SOFT_VOICE_EVERY: [number, number] = [10, 16];
 
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
@@ -724,8 +730,12 @@ export class Haunts {
   private presenceVoice(h: Haunt, dt: number, c: THREE.Vector3): void {
     h.voiceTimer -= dt;
     if (h.voiceTimer > 0) return;
-    h.voiceTimer = rand(...PRESENCE_VOICE_EVERY);
-    this.sound.playGhostVoice(this.voiceOf(h), { x: c.x, y: Math.min(c.y + 0.6, SEG_H), z: c.z }, true, PRESENCE_VOICE_VOLUME);
+    const voice = this.voiceOf(h);
+    const kind = voice ? pickVoiceKind(voice) : 'croak';
+    const soft = kind === 'giggle' || kind === 'sob';
+    h.voiceTimer = soft ? rand(...SOFT_VOICE_EVERY) : rand(...PRESENCE_VOICE_EVERY);
+    if (soft && Math.random() > SOFT_VOICE_CHANCE) return; // 이번 차례는 조용히 넘김
+    this.sound.playGhostVoice(voice, { x: c.x, y: Math.min(c.y + 0.6, SEG_H), z: c.z }, true, PRESENCE_VOICE_VOLUME, kind);
   }
 
   private voiceOf(h: Haunt): GhostVoiceTag | undefined {
