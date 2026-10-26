@@ -118,6 +118,8 @@ const ACTIVATE_TRIES = 3;
 /** 귀신이 나와 있는 동안 그 목소리가 들리는 간격(초). 멀리서도 들림 (가까이 가지 않아도 됨) */
 const PRESENCE_VOICE_FIRST: [number, number] = [0.8, 2];
 const PRESENCE_VOICE_EVERY: [number, number] = [5, 9];
+/** 나와 있는 동안 들리는 목소리 크기 (마주칠 때보다 작고 얕게) */
+const PRESENCE_VOICE_VOLUME = 0.55;
 
 const ROLE: Record<HauntKind, GhostRole> = {
   approach: 'approach',
@@ -243,7 +245,7 @@ export class Haunts {
   }
 
   private newHaunt(cell: string, kind: HauntKind, extra: Partial<Haunt>): Haunt {
-    return {
+    const h: Haunt = {
       id: this.nextId++,
       cell,
       kind,
@@ -264,6 +266,9 @@ export class Haunts {
       voiceTimer: rand(...PRESENCE_VOICE_FIRST),
       ...extra,
     };
+    // 이 귀신의 목소리 파일을 미리 받아 둠 (나타나기 전에 목소리가 먼저 들리므로)
+    this.sound.preloadGhostVoice(this.voiceOf(h));
+    return h;
   }
 
   public onCellDisposed(cell: string): void {
@@ -709,7 +714,7 @@ export class Haunts {
   }
 
   /**
-   * 귀신이 나와 있는 동안 가끔 그 귀신의 목소리(성별·나이에 맞는 웃음/울음 등)를 냄.
+   * 귀신이 나와 있는 동안 가끔 그 귀신의 목소리(성별·나이에 맞는 키득거림/흐느낌)를 작게 냄.
    * 거리 감쇠를 약하게 해서 같은 복도 어디서든, 옆 복도에서도 희미하게 들림.
    * (추적자는 들키면 안 되므로 발소리만 냄)
    */
@@ -717,7 +722,7 @@ export class Haunts {
     h.voiceTimer -= dt;
     if (h.voiceTimer > 0) return;
     h.voiceTimer = rand(...PRESENCE_VOICE_EVERY);
-    this.sound.playGhostVoice(this.voiceOf(h), { x: c.x, y: Math.min(c.y + 0.6, SEG_H), z: c.z }, true);
+    this.sound.playGhostVoice(this.voiceOf(h), { x: c.x, y: Math.min(c.y + 0.6, SEG_H), z: c.z }, true, PRESENCE_VOICE_VOLUME);
   }
 
   private voiceOf(h: Haunt): GhostVoiceTag | undefined {
@@ -781,6 +786,7 @@ export class Haunts {
         clip: clipForRole(ROLE[kind]),
         voiceTimer: rand(...PRESENCE_VOICE_FIRST),
       });
+      this.sound.preloadGhostVoice(this.voiceOf(h));
     }
   }
 
@@ -985,7 +991,8 @@ export class Haunts {
       if (!this.followerWasSeen) {
         this.followerWasSeen = true;
         if (this.followerStage === 0) {
-          this.sound.playEerieHumOrWhisper({ x: g.root.position.x, y: 1.6, z: g.root.position.z }, '[낮은 흥얼거림]');
+          // 처음 눈이 마주치면 그 귀신의 목소리 (키득거림 / 흐느낌)
+          this.sound.playGhostVoice(g.voice, { x: g.root.position.x, y: 1.6, z: g.root.position.z }, false, PRESENCE_VOICE_VOLUME);
         }
         this.followerStage = Math.min(trail.length - 1, this.followerStage + 1);
       }

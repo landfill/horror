@@ -1,5 +1,13 @@
 import * as THREE from 'three';
-import { GhostVoiceTag, VOICE_FILES, pickVoiceKind, synthGhostVoice, voiceGroupId, voiceSubtitle } from './GhostVoice';
+import {
+  GhostVoiceTag,
+  VOICE_FILES,
+  VoiceGroupId,
+  pickVoiceKind,
+  synthGhostVoice,
+  voiceGroupId,
+  voiceSubtitle,
+} from './GhostVoice';
 
 export interface SpatialPos {
   x: number;
@@ -26,6 +34,12 @@ export class SoundManager {
   private subtitleCallback?: (text: string, reversed?: boolean) => void;
   /** 귀신 목소리 녹음 파일 (경로 → 디코딩된 소리). 못 불러온 파일은 null */
   private voiceBuffers = new Map<string, AudioBuffer | null>();
+  /** 받기로 한 목소리 그룹 (귀신이 배치될 때 추가) */
+  private voiceGroupsWanted = new Set<VoiceGroupId>();
+  /** 거꾸로 재생용 버퍼 */
+  private voiceReversed = new WeakMap<AudioBuffer, AudioBuffer>();
+  /** 방금 재생한 녹음 파일 (같은 파일이 연달아 나오지 않게) */
+  private lastVoiceUrl = '';
 
   public setSubtitleHandler(cb: (text: string, reversed?: boolean) => void): void {
     this.subtitleCallback = cb;
@@ -54,26 +68,49 @@ export class SoundManager {
 
     this.setupReverb();
     this.startAmbientHum();
-    this.loadVoiceFiles();
+    // 소리 시작 전에 배치된 귀신의 파일을 이제 받음
+    for (const g of this.voiceGroupsWanted) this.loadVoiceGroup(g);
   }
 
-  /** VOICE_FILES에 적힌 녹음 파일을 미리 받아 둠 (실패하면 합성 목소리를 씀) */
-  private loadVoiceFiles(): void {
+  /**
+   * 그 귀신 그룹(성별·나이대)의 녹음 파일을 받아 둠. 귀신이 배치될 때 부르므로
+   * 실제로 나오는 귀신의 파일만, 처음 필요할 때 한 번 받습니다. 실패하면 합성 목소리를 씀.
+   */
+  public preloadGhostVoice(tag: GhostVoiceTag | undefined): void {
+    if (!tag) return;
+    const group = voiceGroupId(tag);
+    if (this.voiceGroupsWanted.has(group)) return;
+    this.voiceGroupsWanted.add(group);
+    this.loadVoiceGroup(group);
+  }
+
+  private loadVoiceGroup(group: VoiceGroupId): void {
     const ctx = this.ctx;
-    if (!ctx) return;
-    for (const group of Object.values(VOICE_FILES)) {
-      for (const list of Object.values(group ?? {})) {
-        for (const url of list ?? []) {
-          if (this.voiceBuffers.has(url)) continue;
-          this.voiceBuffers.set(url, null);
-          fetch(url)
-            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
-            .then((data) => ctx.decodeAudioData(data))
-            .then((buf) => this.voiceBuffers.set(url, buf))
-            .catch(() => console.warn(`[voice] 불러오지 못함: ${url}`));
-        }
+    if (!ctx) return; // 소리 시작 전이면 init()에서 다시 부름
+    for (const list of Object.values(VOICE_FILES[group] ?? {})) {
+      for (const url of list ?? []) {
+        if (this.voiceBuffers.has(url)) continue;
+        this.voiceBuffers.set(url, null);
+        fetch(url)
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status}`))))
+          .then((data) => ctx.decodeAudioData(data))
+          .then((buf) => this.voiceBuffers.set(url, buf))
+          .catch(() => console.warn(`[voice] 불러오지 못함: ${url}`));
       }
     }
+  }
+
+  /** 거꾸로 재생용 버퍼 (처음 쓸 때 한 번 만들어 둠) */
+  private reversedBuffer(buf: AudioBuffer): AudioBuffer {
+    let rev = this.voiceReversed.get(buf);
+    if (rev || !this.ctx) return rev ?? buf;
+    rev = this.ctx.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      rev.getChannelData(ch).set(buf.getChannelData(ch));
+      rev.getChannelData(ch).reverse();
+    }
+    this.voiceReversed.set(buf, rev);
+    return rev;
   }
 
   public resume(): void {
@@ -342,11 +379,12 @@ export class SoundManager {
   }
 
   /**
-   * 귀신 목소리 (성별·나이대에 맞는 웃음/울음/흐느낌/속삭임).
+   * 귀신 목소리 (성별·나이대에 맞는 키득거리는 웃음 / 흐느낌).
+   * volume: 크기 배율 (멀리서 들리는 목소리는 작게)
    * 녹음 파일이 있으면 그것을, 없으면 합성 목소리를 냅니다.
    * 목소리 정보가 없는 귀신은 목 긁는 소리로 대신합니다.
    */
-  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false): void {
+  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false, volume = 1): void {
     if (!this.ctx || this.isMuted) return;
     if (!tag) {
       this.playDeathRattle(pos, far);
@@ -356,19 +394,28 @@ export class SoundManager {
     const dest = this.createPanner(pos, far);
     this.emitSubtitle(voiceSubtitle(tag, kind));
 
-    const files = (VOICE_FILES[voiceGroupId(tag)]?.[kind] ?? [])
-      .map((url) => this.voiceBuffers.get(url))
-      .filter((b): b is AudioBuffer => !!b);
-    if (files.length > 0) {
+    // 받아 둔 파일 중에서 고르되, 방금 나온 파일은 (다른 게 있으면) 피함
+    this.preloadGhostVoice(tag);
+    const ready = (VOICE_FILES[voiceGroupId(tag)]?.[kind] ?? []).filter((url) => this.voiceBuffers.get(url));
+    const pool = ready.length > 1 ? ready.filter((url) => url !== this.lastVoiceUrl) : ready;
+    if (pool.length > 0) {
+      const url = pool[Math.floor(Math.random() * pool.length)];
+      this.lastVoiceUrl = url;
+      const buf = this.voiceBuffers.get(url)!;
       const src = this.ctx.createBufferSource();
-      src.buffer = files[Math.floor(Math.random() * files.length)];
-      // 매번 조금씩 다르게 들리도록 높이를 살짝 흔듦
-      src.playbackRate.value = 0.94 + Math.random() * 0.1;
-      src.connect(dest);
+      // 가끔(약 12%) 거꾸로 재생해 사람 소리인데 어딘가 어긋난 느낌을 줌
+      src.buffer = Math.random() < 0.12 ? this.reversedBuffer(buf) : buf;
+      // 매번 조금씩 다르게 들리도록 높이를 ±8% 안에서 흔듦
+      src.playbackRate.value = 0.92 + Math.random() * 0.16;
+      const g = this.ctx.createGain();
+      g.gain.value = volume;
+      src.connect(g);
+      g.connect(dest);
       src.start();
       return;
     }
-    synthGhostVoice(this.ctx, dest, tag, kind);
+    // 아직 못 받았거나 받기에 실패하면 합성 목소리
+    synthGhostVoice(this.ctx, dest, tag, kind, this.ctx.currentTime, volume);
   }
 
   /**
