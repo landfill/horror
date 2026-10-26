@@ -354,8 +354,11 @@ export class Haunts {
   private jolt(h: Haunt, at: THREE.Vector3): void {
     this.world.flash(0.04, 0.65);
     this.sound.playVhsStatic(0.45);
-    // 영상 속 인물의 성별·나이에 맞는 목소리 (태그가 없으면 목 긁는 소리)
-    this.sound.playGhostVoice(h.ghost?.voice, { x: at.x, y: Math.min(at.y + 0.6, SEG_H), z: at.z });
+    // 영상 속 인물의 성별·나이에 맞는 목소리 (태그가 없으면 목 막힌 소리).
+    // 목 막힌 소리를 낼 수 있는 귀신은 마주치는 순간 꼭 그 소리를 냄 (주온 가야코처럼)
+    const voice = h.ghost?.voice;
+    const kind = voice?.kinds?.includes('croak') ? 'croak' : undefined;
+    this.sound.playGhostVoice(voice, { x: at.x, y: Math.min(at.y + 0.6, SEG_H), z: at.z }, false, 1, kind);
     this.lights.killNearest(at.x, at.z);
     this.finish(h, REST_AFTER_JOLT);
   }

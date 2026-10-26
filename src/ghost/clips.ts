@@ -21,8 +21,8 @@ export type GhostRole =
 export type GhostGender = 'female' | 'male';
 /** 귀신 목소리 구분용: 영상 속 인물의 나이대 */
 export type GhostAge = 'child' | 'adult' | 'elderly';
-/** 귀신이 내는 사람 목소리 종류: 키득거리는 얕은 웃음, 흐느낌 */
-export type VoiceKind = 'giggle' | 'sob';
+/** 귀신이 내는 사람 목소리 종류: 키득거리는 얕은 웃음, 흐느낌, 목 막힌 "꺼거걱" 소리 */
+export type VoiceKind = 'giggle' | 'sob' | 'croak';
 
 export interface GhostClip {
   id: string;
@@ -104,7 +104,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['ceiling'],
     gender: 'female',
     age: 'adult',
-    voices: ['giggle'],
+    voices: ['croak', 'giggle'],
     stepFps: 12,
   },
   {
@@ -119,7 +119,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['wallcrawl'],
     gender: 'female',
     age: 'adult',
-    voices: ['giggle', 'sob'],
+    voices: ['croak', 'giggle'],
     stepFps: 12,
   },
   {
@@ -172,7 +172,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['crawling'],
     gender: 'female',
     age: 'adult',
-    voices: ['sob', 'giggle'],
+    voices: ['croak', 'sob'],
     stepFps: 12,
   },
   {

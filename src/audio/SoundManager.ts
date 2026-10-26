@@ -1,5 +1,8 @@
 import * as THREE from 'three';
+import type { VoiceKind } from '../ghost/clips';
+import { croakBuffer } from './GhostCroak';
 import {
+  CROAK_SUBTITLE,
   GhostVoiceTag,
   VOICE_FILES,
   VoiceGroupId,
@@ -351,46 +354,41 @@ export class SoundManager {
   }
 
   /**
-   * 주온 스타일 목에서 나는 "으으으… 딸깍딸깍" 래틀 소리
+   * 주온 스타일 목 막힌 "꺼거걱" 소리 (GhostCroak.ts에서 합성)
    */
-  public playDeathRattle(pos?: SpatialPos, far = false): void {
+  public playDeathRattle(pos?: SpatialPos, far = false, volume = 0.9): void {
     if (!this.ctx || this.isMuted) return;
-    const now = this.ctx.currentTime;
     const dest = this.createPanner(pos, far);
-    this.emitSubtitle('[목에서 긁히는 소리]');
-
-    const clicks = 14;
-    for (let i = 0; i < clicks; i++) {
-      const t = now + i * (0.055 + (i % 3) * 0.018);
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(95 + (i % 4) * 28, t);
-      osc.frequency.exponentialRampToValueAtTime(42, t + 0.035);
-
-      gain.gain.setValueAtTime(0.22, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-
-      osc.connect(gain);
-      gain.connect(dest);
-      osc.start(t);
-      osc.stop(t + 0.042);
-    }
+    this.emitSubtitle(CROAK_SUBTITLE);
+    const src = this.ctx.createBufferSource();
+    src.buffer = croakBuffer(this.ctx, 1.08);
+    src.playbackRate.value = 0.94 + Math.random() * 0.12;
+    const g = this.ctx.createGain();
+    g.gain.value = volume;
+    src.connect(g);
+    g.connect(dest);
+    src.start();
   }
 
   /**
-   * 귀신 목소리 (성별·나이대에 맞는 키득거리는 웃음 / 흐느낌).
+   * 귀신 목소리 (성별·나이대에 맞는 키득거리는 웃음 / 흐느낌 / 목 막힌 소리).
    * volume: 크기 배율 (멀리서 들리는 목소리는 작게)
    * 녹음 파일이 있으면 그것을, 없으면 합성 목소리를 냅니다.
    * 목소리 정보가 없는 귀신은 목 긁는 소리로 대신합니다.
    */
-  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false, volume = 1): void {
+  public playGhostVoice(
+    tag: GhostVoiceTag | undefined,
+    pos?: SpatialPos,
+    far = false,
+    volume = 1,
+    /** 정해진 종류로 낼 때 (없으면 그 귀신의 목록에서 무작위) */
+    kind: VoiceKind = tag ? pickVoiceKind(tag) : 'croak',
+  ): void {
     if (!this.ctx || this.isMuted) return;
     if (!tag) {
       this.playDeathRattle(pos, far);
       return;
     }
-    const kind = pickVoiceKind(tag);
     const dest = this.createPanner(pos, far);
     this.emitSubtitle(voiceSubtitle(tag, kind));
 
