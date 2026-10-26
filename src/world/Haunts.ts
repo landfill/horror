@@ -245,7 +245,7 @@ export class Haunts {
   }
 
   private newHaunt(cell: string, kind: HauntKind, extra: Partial<Haunt>): Haunt {
-    return {
+    const h: Haunt = {
       id: this.nextId++,
       cell,
       kind,
@@ -266,6 +266,9 @@ export class Haunts {
       voiceTimer: rand(...PRESENCE_VOICE_FIRST),
       ...extra,
     };
+    // 이 귀신의 목소리 파일을 미리 받아 둠 (나타나기 전에 목소리가 먼저 들리므로)
+    this.sound.preloadGhostVoice(this.voiceOf(h));
+    return h;
   }
 
   public onCellDisposed(cell: string): void {
@@ -783,6 +786,7 @@ export class Haunts {
         clip: clipForRole(ROLE[kind]),
         voiceTimer: rand(...PRESENCE_VOICE_FIRST),
       });
+      this.sound.preloadGhostVoice(this.voiceOf(h));
     }
   }
 

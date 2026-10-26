@@ -20,7 +20,13 @@ export function voiceGroupId(tag: GhostVoiceTag): VoiceGroupId {
  * 넣을 수 있는 파일과 출처 기록 방법은 public/voices/README.md 참고.
  */
 export const VOICE_FILES: Partial<Record<VoiceGroupId, Partial<Record<VoiceKind, string[]>>>> = {
-  // 예: 'adult-female': { sob: ['/voices/adult-female/sob-1.m4a'] },
+  'adult-female': {
+    giggle: ['/voices/adult-female/giggle-1.m4a', '/voices/adult-female/giggle-2.m4a', '/voices/adult-female/giggle-3.m4a'],
+    sob: ['/voices/adult-female/sob-1.m4a', '/voices/adult-female/sob-2.m4a', '/voices/adult-female/sob-3.m4a'],
+  },
+  'child-male': {
+    giggle: ['/voices/child-male/giggle-1.m4a', '/voices/child-male/giggle-2.m4a', '/voices/child-male/giggle-3.m4a'],
+  },
 };
 
 /** 성별·나이대별 기본 목소리 종류 */
@@ -56,7 +62,7 @@ export function voiceSubtitle(tag: GhostVoiceTag, kind: VoiceKind): string {
 }
 
 // ---------------------------------------------------------------------------
-// 합성 목소리: 녹음 파일이 없을 때 씁니다.
+// 합성 목소리: 녹음 파일이 없거나 아직 받는 중일 때 씁니다.
 // 숨소리(노이즈)를 중심으로 두고 성대 울림은 살짝만 섞어 "흐흐흐", "흐윽" 같은
 // 작은 소리를 만듭니다. 성대 울림이 크거나 떨림이 규칙적이면 기계음처럼 들리므로
 // 음 높이는 불규칙한 저주파 노이즈로 흔들고, 소리 시작과 끝은 부드럽게 둡니다.
