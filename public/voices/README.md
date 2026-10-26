@@ -17,6 +17,8 @@
 
 ## 라이선스
 
+- 게임 안에서는 일시정지 창 맨 아래에 출처를 표시합니다 (`index.html`의 `.credits`). 파일을 바꾸면 그 줄도 함께 고칩니다.
+
 - CC0(퍼블릭 도메인)만 넣습니다. CC-BY는 크레딧 표기가 필요하므로 아래 표에 꼭 적습니다.
 - 찾을 곳: freesound.org에서 라이선스 필터를 "Creative Commons 0"으로 두고 검색
   (예: `woman sobbing quiet`, `woman sniffle`, `child giggle`, `creepy giggle`).
