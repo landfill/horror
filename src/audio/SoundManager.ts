@@ -342,11 +342,12 @@ export class SoundManager {
   }
 
   /**
-   * 귀신 목소리 (성별·나이대에 맞는 웃음/울음/흐느낌/속삭임).
+   * 귀신 목소리 (성별·나이대에 맞는 키득거리는 웃음 / 흐느낌).
+   * volume: 크기 배율 (멀리서 들리는 목소리는 작게)
    * 녹음 파일이 있으면 그것을, 없으면 합성 목소리를 냅니다.
    * 목소리 정보가 없는 귀신은 목 긁는 소리로 대신합니다.
    */
-  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false): void {
+  public playGhostVoice(tag: GhostVoiceTag | undefined, pos?: SpatialPos, far = false, volume = 1): void {
     if (!this.ctx || this.isMuted) return;
     if (!tag) {
       this.playDeathRattle(pos, far);
@@ -364,11 +365,14 @@ export class SoundManager {
       src.buffer = files[Math.floor(Math.random() * files.length)];
       // 매번 조금씩 다르게 들리도록 높이를 살짝 흔듦
       src.playbackRate.value = 0.94 + Math.random() * 0.1;
-      src.connect(dest);
+      const g = this.ctx.createGain();
+      g.gain.value = volume;
+      src.connect(g);
+      g.connect(dest);
       src.start();
       return;
     }
-    synthGhostVoice(this.ctx, dest, tag, kind);
+    synthGhostVoice(this.ctx, dest, tag, kind, this.ctx.currentTime, volume);
   }
 
   /**

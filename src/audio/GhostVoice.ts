@@ -20,17 +20,17 @@ export function voiceGroupId(tag: GhostVoiceTag): VoiceGroupId {
  * 넣을 수 있는 파일과 출처 기록 방법은 public/voices/README.md 참고.
  */
 export const VOICE_FILES: Partial<Record<VoiceGroupId, Partial<Record<VoiceKind, string[]>>>> = {
-  // 예: 'adult-female': { laugh: ['/voices/adult-female/laugh-1.ogg'] },
+  // 예: 'adult-female': { sob: ['/voices/adult-female/sob-1.m4a'] },
 };
 
 /** 성별·나이대별 기본 목소리 종류 */
 const DEFAULT_KINDS: Record<VoiceGroupId, VoiceKind[]> = {
-  'child-female': ['laugh', 'cry'],
-  'child-male': ['laugh', 'cry'],
-  'adult-female': ['sob', 'cry', 'whisper', 'laugh'],
-  'adult-male': ['whisper', 'laugh', 'sob'],
-  'elderly-female': ['whisper', 'laugh', 'sob'],
-  'elderly-male': ['whisper', 'sob'],
+  'child-female': ['giggle'],
+  'child-male': ['giggle'],
+  'adult-female': ['sob', 'giggle'],
+  'adult-male': ['sob'],
+  'elderly-female': ['sob', 'giggle'],
+  'elderly-male': ['sob'],
 };
 
 export function pickVoiceKind(tag: GhostVoiceTag): VoiceKind {
@@ -47,10 +47,8 @@ const WHO: Record<VoiceGroupId, string> = {
   'elderly-male': '노인',
 };
 const KIND_LABEL: Record<VoiceKind, string> = {
-  laugh: '웃음소리',
-  cry: '울음소리',
+  giggle: '키득거리는 웃음',
   sob: '흐느끼는 소리',
-  whisper: '속삭임',
 };
 
 export function voiceSubtitle(tag: GhostVoiceTag, kind: VoiceKind): string {
@@ -58,9 +56,10 @@ export function voiceSubtitle(tag: GhostVoiceTag, kind: VoiceKind): string {
 }
 
 // ---------------------------------------------------------------------------
-// 합성 목소리: 녹음 파일이 없을 때 성대 울림(톱니파) + 숨소리(노이즈)를
-// 모음 공명(포먼트) 필터에 통과시켜 사람 목소리처럼 만듭니다.
-// 성별·나이에 따라 목소리 높이(f0)와 성도 길이(포먼트 배율)가 달라집니다.
+// 합성 목소리: 녹음 파일이 없을 때 씁니다.
+// 숨소리(노이즈)를 중심으로 두고 성대 울림은 살짝만 섞어 "흐흐흐", "흐윽" 같은
+// 작은 소리를 만듭니다. 성대 울림이 크거나 떨림이 규칙적이면 기계음처럼 들리므로
+// 음 높이는 불규칙한 저주파 노이즈로 흔들고, 소리 시작과 끝은 부드럽게 둡니다.
 // ---------------------------------------------------------------------------
 
 interface VoiceProfile {
@@ -68,123 +67,127 @@ interface VoiceProfile {
   f0: number;
   /** 포먼트 배율. 성도가 짧을수록(여자, 아이) 큼 */
   formant: number;
-  /** 음높이 떨림 정도 (f0 비율) */
+  /** 음높이 흔들림 정도 (f0 비율) */
   jitter: number;
-  /** 숨소리 비중 0~1 */
-  breath: number;
-  /** 말 빠르기 배율 (클수록 빠름) */
+  /** 빠르기 배율 (클수록 빠름) */
   tempo: number;
 }
 
 const PROFILES: Record<VoiceGroupId, VoiceProfile> = {
-  'child-female': { f0: 330, formant: 1.32, jitter: 0.02, breath: 0.25, tempo: 1.25 },
-  'child-male': { f0: 300, formant: 1.28, jitter: 0.02, breath: 0.25, tempo: 1.25 },
-  'adult-female': { f0: 215, formant: 1.16, jitter: 0.025, breath: 0.35, tempo: 1 },
-  'adult-male': { f0: 112, formant: 1.0, jitter: 0.025, breath: 0.3, tempo: 0.95 },
-  'elderly-female': { f0: 185, formant: 1.1, jitter: 0.06, breath: 0.55, tempo: 0.8 },
-  'elderly-male': { f0: 100, formant: 0.97, jitter: 0.06, breath: 0.55, tempo: 0.8 },
+  'child-female': { f0: 340, formant: 1.3, jitter: 0.03, tempo: 1.2 },
+  'child-male': { f0: 310, formant: 1.26, jitter: 0.03, tempo: 1.2 },
+  'adult-female': { f0: 230, formant: 1.15, jitter: 0.035, tempo: 1 },
+  'adult-male': { f0: 120, formant: 1.0, jitter: 0.035, tempo: 0.95 },
+  'elderly-female': { f0: 200, formant: 1.1, jitter: 0.06, tempo: 0.85 },
+  'elderly-male': { f0: 105, formant: 0.97, jitter: 0.06, tempo: 0.85 },
 };
 
-type Vowel = 'a' | 'i' | 'u' | 'o';
-/** 성인 남성 기준 포먼트 (F1, F2, F3) */
+type Vowel = 'a' | 'i' | 'u' | 'o' | 'eu';
+/** 성인 남성 기준 포먼트 (F1, F2, F3). eu = "으" */
 const VOWELS: Record<Vowel, [number, number, number]> = {
   a: [730, 1090, 2440],
   i: [300, 2200, 2950],
   u: [320, 870, 2240],
   o: [500, 900, 2400],
+  eu: [350, 1400, 2500],
 };
 
-/** 한 음절(소리 덩어리) */
+/** 한 소리 덩어리 */
 interface Syllable {
   /** 시작 시각(초, 소리 전체 시작 기준) */
   at: number;
   dur: number;
   vowel: Vowel;
+  /** 끝날 때 모음 (없으면 그대로) */
+  vowelTo?: Vowel;
   /** 시작·끝 음높이 (f0 배율) */
   pitchFrom: number;
   pitchTo: number;
-  /** 성대 울림 0~1 (0이면 속삭임·숨) */
+  /** 성대 울림 0~1. 작을수록 숨소리만 남음 */
   voiced: number;
-  /** 숨소리 0~1 */
-  breath: number;
   /** 최대 크기 */
   peak: number;
-  /** 비브라토(울먹임) 깊이 (f0 비율) */
-  vibrato?: number;
+  /** 소리가 올라오는 시간(초) */
+  attack: number;
 }
 
 function rnd(a: number, b: number): number {
   return a + Math.random() * (b - a);
 }
 
-function laughSyllables(p: VoiceProfile): Syllable[] {
-  const n = Math.floor(rnd(5, 8));
-  const step = 0.19 / p.tempo;
+/** 키득거림: 코와 목으로 새는 짧은 "흐흐흐", 점점 작아짐. 간격은 조금씩 불규칙 */
+function giggleSyllables(p: VoiceProfile): Syllable[] {
+  const n = Math.floor(rnd(4, 7));
   const out: Syllable[] = [];
-  let pitch = rnd(1.35, 1.55);
+  let t = 0;
+  let pitch = rnd(1.15, 1.3);
   for (let i = 0; i < n; i++) {
+    const dur = rnd(0.07, 0.11) / p.tempo;
+    // 첫 소리는 조금 작게 시작했다가 커지고 점점 사그라듦
+    const peak = (i === 0 ? 0.65 : 1 - (i / n) * 0.55) * rnd(0.85, 1);
     out.push({
-      at: Math.max(0, i * step + rnd(-0.015, 0.015)),
-      dur: 0.12 / p.tempo,
-      vowel: i % 3 === 2 ? 'i' : 'a',
-      pitchFrom: pitch,
-      pitchTo: pitch * 0.88,
-      voiced: 1,
-      breath: 0.5,
-      peak: 0.9 - i * 0.06,
+      at: t,
+      dur,
+      vowel: Math.random() < 0.6 ? 'eu' : 'i',
+      pitchFrom: pitch * rnd(0.97, 1.03),
+      pitchTo: pitch * 0.9,
+      voiced: rnd(0.18, 0.3),
+      peak,
+      attack: 0.012,
     });
-    pitch *= 0.95;
+    pitch *= rnd(0.95, 0.99);
+    t += dur + rnd(0.05, 0.09) / p.tempo + i * 0.008;
   }
-  // 끝에 숨 들이쉬기
-  out.push({ at: n * step + 0.05, dur: 0.35, vowel: 'i', pitchFrom: 1, pitchTo: 1, voiced: 0, breath: 1, peak: 0.35 });
+  // 끝에 코로 짧게 내쉬는 숨
+  out.push({ at: t + 0.04, dur: 0.22, vowel: 'u', pitchFrom: 1, pitchTo: 1, voiced: 0, peak: 0.35, attack: 0.03 });
   return out;
 }
 
-function crySyllables(p: VoiceProfile): Syllable[] {
-  const long = rnd(1.4, 1.9) / p.tempo;
-  return [
-    { at: 0, dur: long, vowel: 'a', pitchFrom: 1.45, pitchTo: 0.85, voiced: 1, breath: 0.45, peak: 0.85, vibrato: 0.045 },
-    { at: long + 0.12, dur: 0.3, vowel: 'i', pitchFrom: 1, pitchTo: 1, voiced: 0, breath: 1, peak: 0.35 },
-    { at: long + 0.5, dur: long * 0.6, vowel: 'o', pitchFrom: 1.3, pitchTo: 0.8, voiced: 1, breath: 0.5, peak: 0.7, vibrato: 0.05 },
-  ];
-}
-
+/** 흐느낌: 떨리며 들이쉬는 숨 몇 번 → 울먹이며 "흐으…" 내쉼. 두 번째는 더 작게 */
 function sobSyllables(p: VoiceProfile): Syllable[] {
   const out: Syllable[] = [];
   let t = 0;
-  const cycles = 3;
+  const cycles = Math.random() < 0.5 ? 1 : 2;
   for (let c = 0; c < cycles; c++) {
-    // 떨리는 들숨 두세 번
-    const catches = Math.floor(rnd(2, 4));
+    const level = c === 0 ? 1 : 0.6;
+    // 떨리는 들숨 ("흑, 흑, 흑")
+    const catches = Math.floor(rnd(2, 5));
     for (let k = 0; k < catches; k++) {
-      out.push({ at: t, dur: 0.09, vowel: 'i', pitchFrom: 1.6, pitchTo: 1.5, voiced: 0.15, breath: 1, peak: 0.45 });
-      t += 0.13 / p.tempo;
+      const dur = rnd(0.05, 0.08);
+      out.push({
+        at: t,
+        dur,
+        vowel: 'i',
+        pitchFrom: 1.5,
+        pitchTo: 1.55,
+        voiced: 0.08,
+        peak: (0.45 + k * 0.12) * level,
+        attack: 0.01,
+      });
+      t += dur + rnd(0.05, 0.11) / p.tempo;
     }
-    // 울먹이는 "으흐흑"
-    out.push({ at: t, dur: 0.42 / p.tempo, vowel: 'u', pitchFrom: 1.25, pitchTo: 0.9, voiced: 1, breath: 0.6, peak: 0.75, vibrato: 0.06 });
-    t += 0.42 / p.tempo + rnd(0.25, 0.4);
-  }
-  return out;
-}
-
-function whisperSyllables(p: VoiceProfile): Syllable[] {
-  const vowels: Vowel[] = ['a', 'i', 'u', 'o'];
-  const n = Math.floor(rnd(5, 8));
-  const out: Syllable[] = [];
-  let t = 0;
-  for (let i = 0; i < n; i++) {
-    const dur = rnd(0.14, 0.26) / p.tempo;
-    out.push({ at: t, dur, vowel: vowels[Math.floor(Math.random() * vowels.length)], pitchFrom: 1, pitchTo: 1, voiced: 0, breath: 1, peak: 0.9 });
-    t += dur + rnd(0.04, 0.12);
+    t += rnd(0.04, 0.1);
+    // 울먹이며 내쉬는 "흐으…"
+    const dur = rnd(0.55, 0.9) / p.tempo;
+    out.push({
+      at: t,
+      dur,
+      vowel: 'eu',
+      vowelTo: 'u',
+      pitchFrom: rnd(1.2, 1.35),
+      pitchTo: rnd(0.85, 0.95),
+      voiced: rnd(0.3, 0.42),
+      peak: 0.75 * level,
+      attack: 0.06,
+    });
+    t += dur + rnd(0.3, 0.55);
   }
   return out;
 }
 
 const SYLLABLES: Record<VoiceKind, (p: VoiceProfile) => Syllable[]> = {
-  laugh: laughSyllables,
-  cry: crySyllables,
+  giggle: giggleSyllables,
   sob: sobSyllables,
-  whisper: whisperSyllables,
 };
 
 let noiseCache: { ctx: BaseAudioContext; buf: AudioBuffer } | null = null;
@@ -212,16 +215,22 @@ export function synthGhostVoice(
 ): number {
   const p = PROFILES[voiceGroupId(tag)];
   const syl = SYLLABLES[kind](p);
-  const f0 = p.f0 * rnd(0.95, 1.05);
+  const f0 = p.f0 * rnd(0.94, 1.06);
+  const noise = noiseBuffer(ctx);
 
-  // 모든 음절이 지나가는 공통 출력 (크기 맞춤 + 귀신답게 살짝 어둡게)
+  // 공통 출력: 낮은 웅웅거림과 날카로운 고음을 깎아 부드럽게
   const out = ctx.createGain();
-  out.gain.value = 0.55 * volume;
-  const tone = ctx.createBiquadFilter();
-  tone.type = 'lowpass';
-  tone.frequency.value = 5200;
-  out.connect(tone);
-  tone.connect(dest);
+  out.gain.value = 0.9 * volume;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 140;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 4200;
+  lp.Q.value = 0.5;
+  out.connect(hp);
+  hp.connect(lp);
+  lp.connect(dest);
 
   let end = 0;
   for (const s of syl) {
@@ -229,64 +238,73 @@ export function synthGhostVoice(
     const t1 = t0 + s.dur;
     end = Math.max(end, s.at + s.dur);
 
+    // 부드럽게 올라왔다가 자연스럽게 사그라드는 크기
     const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t0);
-    env.gain.linearRampToValueAtTime(s.peak, t0 + Math.min(0.03, s.dur * 0.3));
-    env.gain.setValueAtTime(s.peak, Math.max(t0 + 0.03, t1 - s.dur * 0.35));
-    env.gain.exponentialRampToValueAtTime(0.0001, t1);
+    env.gain.setValueAtTime(0, t0);
+    env.gain.setTargetAtTime(s.peak, t0, s.attack / 3);
+    env.gain.setTargetAtTime(0, t0 + s.dur * 0.55, s.dur * 0.18);
     env.connect(out);
 
-    // 모음 공명 (포먼트 3개 병렬)
-    const fm = VOWELS[s.vowel];
+    // 모음 공명 (포먼트 3개 병렬). Q를 낮게 두어 휘파람 같은 울림을 막음
+    const from = VOWELS[s.vowel];
+    const to = VOWELS[s.vowelTo ?? s.vowel];
     const bank = ctx.createGain();
-    const fGains = [1, 0.55, 0.28];
-    fm.forEach((f, i) => {
+    const fGains = [1.6, 1.0, 0.5];
+    const qs = [4, 6, 8];
+    for (let i = 0; i < 3; i++) {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = f * p.formant;
-      bp.Q.value = [7, 10, 14][i];
+      bp.frequency.setValueAtTime(from[i] * p.formant, t0);
+      if (to !== from) bp.frequency.linearRampToValueAtTime(to[i] * p.formant, t1);
+      bp.Q.value = qs[i];
       const g = ctx.createGain();
-      g.gain.value = fGains[i] * 4;
+      g.gain.value = fGains[i];
       bank.connect(bp);
       bp.connect(g);
       g.connect(env);
-    });
+    }
 
-    // 성대 울림
+    // 숨소리 (중심)
+    const n = ctx.createBufferSource();
+    n.buffer = noise;
+    const ng = ctx.createGain();
+    ng.gain.value = 1 - s.voiced * 0.5;
+    n.connect(ng);
+    ng.connect(bank);
+    n.start(t0, Math.random() * 3);
+    n.stop(t1 + 0.3);
+
+    // 성대 울림 (살짝만). 톱니파를 한 번 걸러 버저처럼 들리지 않게 함
     if (s.voiced > 0) {
       const osc = ctx.createOscillator();
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(f0 * s.pitchFrom, t0);
       osc.frequency.exponentialRampToValueAtTime(f0 * s.pitchTo, t1);
-      // 떨림(노화·울먹임)
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = s.vibrato ? 5.5 : 9 + Math.random() * 3;
-      const lfoGain = ctx.createGain();
-      lfoGain.gain.value = f0 * (s.vibrato ?? p.jitter);
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc.frequency);
+      // 불규칙한 음높이 흔들림: 아주 느린 노이즈로 주파수를 흔듦 (사인파 떨림은 기계음처럼 들림)
+      const wob = ctx.createBufferSource();
+      wob.buffer = noise;
+      const wobLp = ctx.createBiquadFilter();
+      wobLp.type = 'lowpass';
+      wobLp.frequency.value = 12;
+      const wobGain = ctx.createGain();
+      // 12Hz로 거른 노이즈는 크기가 아주 작아져서 크게 키움
+      wobGain.gain.value = f0 * p.jitter * 40;
+      wob.connect(wobLp);
+      wobLp.connect(wobGain);
+      wobGain.connect(osc.frequency);
+      const soft = ctx.createBiquadFilter();
+      soft.type = 'lowpass';
+      soft.frequency.value = f0 * 6;
       const vg = ctx.createGain();
-      vg.gain.value = s.voiced * 0.6;
-      osc.connect(vg);
+      vg.gain.value = s.voiced * 0.9;
+      osc.connect(soft);
+      soft.connect(vg);
       vg.connect(bank);
       osc.start(t0);
-      lfo.start(t0);
-      osc.stop(t1 + 0.02);
-      lfo.stop(t1 + 0.02);
-    }
-
-    // 숨소리
-    const breath = Math.min(1, s.breath * (s.voiced > 0 ? p.breath * 2 : 1));
-    if (breath > 0) {
-      const n = ctx.createBufferSource();
-      n.buffer = noiseBuffer(ctx);
-      const ng = ctx.createGain();
-      ng.gain.value = breath * (s.voiced > 0 ? 0.5 : 0.6);
-      n.connect(ng);
-      ng.connect(bank);
-      n.start(t0, Math.random());
-      n.stop(t1 + 0.02);
+      wob.start(t0, Math.random() * 3);
+      osc.stop(t1 + 0.3);
+      wob.stop(t1 + 0.3);
     }
   }
-  return end;
+  return end + 0.3;
 }

@@ -21,8 +21,8 @@ export type GhostRole =
 export type GhostGender = 'female' | 'male';
 /** 귀신 목소리 구분용: 영상 속 인물의 나이대 */
 export type GhostAge = 'child' | 'adult' | 'elderly';
-/** 귀신이 내는 사람 목소리 종류 */
-export type VoiceKind = 'laugh' | 'cry' | 'sob' | 'whisper';
+/** 귀신이 내는 사람 목소리 종류: 키득거리는 얕은 웃음, 흐느낌 */
+export type VoiceKind = 'giggle' | 'sob';
 
 export interface GhostClip {
   id: string;
@@ -71,7 +71,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['peeking'],
     gender: 'female',
     age: 'adult',
-    voices: ['whisper', 'laugh'],
+    voices: ['giggle'],
     stepFps: 12,
   },
   {
@@ -87,7 +87,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['crouched'],
     gender: 'female',
     age: 'adult',
-    voices: ['sob', 'cry'],
+    voices: ['sob'],
     stepFps: 12,
   },
   {
@@ -104,7 +104,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['ceiling'],
     gender: 'female',
     age: 'adult',
-    voices: ['laugh', 'whisper'],
+    voices: ['giggle'],
     stepFps: 12,
   },
   {
@@ -119,7 +119,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['wallcrawl'],
     gender: 'female',
     age: 'adult',
-    voices: ['laugh', 'cry'],
+    voices: ['giggle', 'sob'],
     stepFps: 12,
   },
   {
@@ -137,7 +137,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['approach'],
     gender: 'female',
     age: 'adult',
-    voices: ['cry', 'sob'],
+    voices: ['sob'],
     stepFps: 12,
   },
   {
@@ -154,7 +154,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['approach'],
     gender: 'male',
     age: 'child',
-    voices: ['laugh'],
+    voices: ['giggle'],
     stepFps: 12,
     approachSpeedMps: 0.08,
   },
@@ -172,7 +172,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['crawling'],
     gender: 'female',
     age: 'adult',
-    voices: ['sob', 'laugh'],
+    voices: ['sob', 'giggle'],
     stepFps: 12,
   },
   {
@@ -187,7 +187,7 @@ export const GHOST_CLIPS: GhostClip[] = [
     roles: ['standing'],
     gender: 'female',
     age: 'adult',
-    voices: ['whisper', 'cry'],
+    voices: ['sob'],
     stepFps: 12,
   },
   {
