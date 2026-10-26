@@ -1,4 +1,5 @@
 import type { GhostAge, GhostGender, VoiceKind } from '../ghost/clips';
+import { croakBuffer } from './GhostCroak';
 
 /** 귀신 한 명의 목소리 정보 (clips.ts의 성별·나이 태그에서 만듦) */
 export interface GhostVoiceTag {
@@ -55,11 +56,16 @@ const WHO: Record<VoiceGroupId, string> = {
 const KIND_LABEL: Record<VoiceKind, string> = {
   giggle: '키득거리는 웃음',
   sob: '흐느끼는 소리',
+  croak: '목 막힌 소리',
 };
 
 export function voiceSubtitle(tag: GhostVoiceTag, kind: VoiceKind): string {
+  if (kind === 'croak') return CROAK_SUBTITLE;
   return `[${WHO[voiceGroupId(tag)]}의 ${KIND_LABEL[kind]}]`;
 }
+
+/** 목 막힌 소리 자막 (누구 소리인지 밝히지 않음) */
+export const CROAK_SUBTITLE = '[목에서 꺼거걱 하는 소리]';
 
 // ---------------------------------------------------------------------------
 // 합성 목소리: 녹음 파일이 없거나 아직 받는 중일 때 씁니다.
@@ -191,7 +197,7 @@ function sobSyllables(p: VoiceProfile): Syllable[] {
   return out;
 }
 
-const SYLLABLES: Record<VoiceKind, (p: VoiceProfile) => Syllable[]> = {
+const SYLLABLES: Record<Exclude<VoiceKind, 'croak'>, (p: VoiceProfile) => Syllable[]> = {
   giggle: giggleSyllables,
   sob: sobSyllables,
 };
@@ -220,6 +226,17 @@ export function synthGhostVoice(
   volume = 1,
 ): number {
   const p = PROFILES[voiceGroupId(tag)];
+  if (kind === 'croak') {
+    // 목 막힌 소리는 따로 계산해 둔 버퍼를 씀. 성도가 짧을수록(여자, 아이) 울림이 높음
+    const src = ctx.createBufferSource();
+    src.buffer = croakBuffer(ctx, p.formant);
+    const g = ctx.createGain();
+    g.gain.value = 0.9 * volume;
+    src.connect(g);
+    g.connect(dest);
+    src.start(when);
+    return src.buffer.duration;
+  }
   const syl = SYLLABLES[kind](p);
   const f0 = p.f0 * rnd(0.94, 1.06);
   const noise = noiseBuffer(ctx);
