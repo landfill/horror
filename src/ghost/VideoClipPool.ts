@@ -45,7 +45,9 @@ export class ClipEntry {
     this.video = v;
 
     const tex = new THREE.Texture(v);
-    tex.colorSpace = THREE.SRGBColorSpace;
+    // 아래쪽 절반은 색상이 아닌 알파 데이터. 통째로 sRGB 디코딩하면
+    // 50% 마스크가 21%로 줄어드므로, 색상 부분만 귀신 셰이더에서 변환합니다.
+    tex.colorSpace = THREE.NoColorSpace;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.generateMipmaps = false;

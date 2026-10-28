@@ -29,7 +29,6 @@ html, body {
   color: #cfcfca;
   font-family: var(--font-ko);
   touch-action: none;
-  filter: grayscale(100%);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -50,27 +49,7 @@ html, body {
   width: 100% !important;
   height: 100% !important;
   display: block;
-  image-rendering: pixelated;
-}
-
-/* Monochrome Vignette Overlay */
-.fx-overlay {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-  overflow: hidden;
-}
-
-.vignette {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at center,
-    rgba(0, 0, 0, 0) 45%,
-    rgba(0, 0, 0, 0.65) 80%,
-    rgba(0, 0, 0, 0.96) 100%
-  );
+  image-rendering: auto;
 }
 
 /* Modal Screens (Pure Black & White) */

@@ -66,7 +66,7 @@ export class LightPool {
   public update(elapsed: number, px: number, pz: number, steady = false): void {
     const list = this.list();
     for (const f of list) {
-      if (f.dead) {
+      if (f.dead || f.base <= 0) {
         f.current = 0;
         f.mat.color.setHex(0x181818);
         continue;
@@ -78,14 +78,17 @@ export class LightPool {
       f.mat.color.setRGB(c, c, c);
     }
 
-    // 가까운 기구 12개 고르기: 매 프레임 배열·객체를 새로 만들지 않도록 재사용 버퍼에 거리만 적고 정렬
+    // 켜질 수 있는 가까운 기구 12개 고르기. 꺼진 기구가 실제 조명 슬롯을 차지하지 않게 함.
+    // 순간 깜빡임은 후보를 바꾸지 않으며, 정렬 버퍼도 매 프레임 재사용.
     const order = this.order;
-    order.length = list.length;
+    let activeCount = 0;
     for (let k = 0; k < list.length; k++) {
       const f = list[k];
+      if (f.dead || f.base <= 0) continue;
       f.dist = Math.hypot(f.x - px, f.z - pz);
-      order[k] = f;
+      order[activeCount++] = f;
     }
+    order.length = activeCount;
     order.sort(byDist);
 
     for (let k = 0; k < this.lights.length; k++) {
@@ -102,14 +105,15 @@ export class LightPool {
     }
   }
 
-  /** 한 지점이 형광등에 얼마나 밝게 비춰지는지 (0~1). 영상 귀신 밝기에 사용. */
+  /** 실제 조명 풀의 거리 감쇠까지 반영한 밝기 (0~1). 영상 귀신 밝기에 사용. */
   public lightAt(x: number, y: number, z: number): number {
     let sum = 0;
-    for (const f of this.list()) {
-      const d = Math.hypot(x - f.x, y - f.y, z - f.z);
+    for (const l of this.lights) {
+      if (l.intensity <= 0) continue;
+      const d = Math.hypot(x - l.position.x, y - l.position.y, z - l.position.z);
       if (d > 11) continue;
       const falloff = 1 - d / 11;
-      sum += (f.current / LIGHT_FULL) * falloff * falloff;
+      sum += (l.intensity / LIGHT_FULL) * falloff * falloff;
     }
     return Math.min(1, 0.05 + sum);
   }

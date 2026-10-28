@@ -37,6 +37,7 @@ export type HauntKind =
 const params = new URLSearchParams(location.search);
 /** ?debug=ghosts : 모든 구간에 귀신 배치, 쿨다운 없음 */
 const DEBUG = params.get('debug') === 'ghosts';
+const DEBUG_STATE = params.has('debug');
 /** ?debug=ghosts&haunt=ceiling : 한 종류만 강제 */
 const FORCE = (params.get('haunt') as HauntKind | null) ?? null;
 
@@ -85,6 +86,8 @@ export function pickWeighted(kinds: HauntKind[]): HauntKind | null {
 
 /** 활성화된 뒤 이 시간 동안 한 번도 안 보이면 내려놓고 다른 귀신에게 차례를 넘김 */
 const UNSEEN_RELEASE_SEC = 8;
+/** 영상 로딩이 멈춰도 귀신 자리를 무한히 차지하지 않도록 하는 제한. */
+const LOAD_WAIT_SEC = 12;
 /** 따라오는 귀신이 이 시간 동안 한 번도 안 보이면 포기하고 사라짐 */
 const FOLLOWER_GIVEUP_SEC = 30;
 /** 따라오는 귀신은 최대 이 시간까지만 (다른 귀신에게도 차례가 가도록) */
@@ -159,6 +162,7 @@ interface Haunt {
   done: boolean;
   seenTime: number;
   unseenTime: number;
+  loadingTime: number;
   everSeen: boolean;
   moved: number;
   minDist: number;
@@ -263,6 +267,7 @@ export class Haunts {
       done: false,
       seenTime: 0,
       unseenTime: 0,
+      loadingTime: 0,
       everSeen: false,
       moved: 0,
       minDist: Infinity,
@@ -432,7 +437,7 @@ export class Haunts {
   /** 아직 아무도 못 본 채 옆쪽에 자리 잡은 귀신이 있고 앞쪽에 후보가 생기면 그쪽으로 옮김 */
   private maybeSwapToFront(): void {
     const a = this.active;
-    if (!a || a.everSeen || !a.ghost) return;
+    if (!a || a.everSeen || !a.ghost?.ready) return;
     if (this.inFront(this.center(a))) return;
     // 앞쪽 자리를 실제로 잡았을 때만 옮김 (못 잡으면 원래 귀신과 그 타이머를 그대로 둠)
     const fronts = this.candidates()
@@ -671,8 +676,24 @@ export class Haunts {
 
     const c = this.center(h);
     const dist = this.flatDist(c);
+    if (!h.ghost.ready) {
+      // 위치만 시야에 들어왔다고 아직 없는 영상을 봤다고 처리하면, 엿보기는
+      // 첫 프레임이 도착하기 전에 숨고 근접 귀신은 보이지 않은 채 마주침이 발생합니다.
+      h.loadingTime += dt;
+      h.ghost.update(dt, elapsed, { cameraPos: this.camPos, light: this.lights.lightAt(c.x, c.y, c.z) });
+      if (dist > DEACTIVATE_DIST || h.loadingTime >= LOAD_WAIT_SEC) {
+        this.release(h);
+        h.loadingTime = 0;
+        if (h.kind === 'follower') this.followerTimer = 5;
+        else this.cooldown = Math.max(this.cooldown, 3);
+      }
+      return;
+    }
+    h.loadingTime = 0;
     const seen = this.isSeen(c);
-    this.lastSeenDebug = { seen, dist: +dist.toFixed(2), c: c.toArray().map((v) => +v.toFixed(2)) };
+    if (DEBUG_STATE) {
+      this.lastSeenDebug = { seen, dist: +dist.toFixed(2), c: c.toArray().map((v) => +v.toFixed(2)) };
+    }
     if (seen) {
       h.seenTime += dt;
       h.unseenTime = 0;
@@ -791,6 +812,7 @@ export class Haunts {
         ly: 0,
         seenTime: 0,
         unseenTime: 0,
+        loadingTime: 0,
         everSeen: false,
         moved: 0,
         minDist: Infinity,

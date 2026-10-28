@@ -61,6 +61,9 @@ export class EndlessWorld {
   private sound: SoundManager;
   private pieces = new Map<string, Piece>();
   private loadedNodes = new Set<string>();
+  // 같은 교차로 안에서는 생성/해제 범위가 변하지 않음.
+  private streamedNodeI = NaN;
+  private streamedNodeJ = NaN;
   private lights: LightPool;
   public readonly haunts: Haunts;
   public readonly anomalies: Anomalies;
@@ -165,6 +168,7 @@ export class EndlessWorld {
 
   private stream(x: number, z: number): void {
     const { i, j } = nearestNode(x, z);
+    if (i === this.streamedNodeI && j === this.streamedNodeJ) return;
     let changed = false;
     for (let di = -BUILD_RADIUS; di <= BUILD_RADIUS; di++) {
       for (let dj = -BUILD_RADIUS; dj <= BUILD_RADIUS; dj++) {
@@ -194,6 +198,8 @@ export class EndlessWorld {
       // 로드된 곳과 닿지 않는 기억은 지움 → 돌아오면 다시 정해짐
       forgetOutside((a, b) => this.loadedNodes.has(`${a},${b}`));
     }
+    this.streamedNodeI = i;
+    this.streamedNodeJ = j;
   }
 
   // -------------------------------------------------------------------------

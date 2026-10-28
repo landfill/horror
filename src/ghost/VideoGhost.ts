@@ -37,8 +37,10 @@ const fragmentShader = /* glsl */ `
     vec3 col = texture2D(map, vec2(vUv.x, 0.5 + y * 0.5)).rgb;
     float a = texture2D(map, vec2(vUv.x, y * 0.5)).r;
 
-    // 변환 스크립트가 프리멀티플라이 했으므로 원래 색으로 되돌림
+    // 변환 스크립트는 감마 공간의 RGB를 프리멀티플라이합니다.
+    // 마스크는 선형 데이터로 유지하고 원래 RGB를 복원한 뒤 색상만 디코딩합니다.
     col = clamp(col / max(a, 0.001), 0.0, 1.0);
+    col = sRGBTransferEOTF(vec4(col, 1.0)).rgb;
 
     // 주변 형광등 밝기에 맞춤 (어두운 곳에서는 실루엣만 남음)
     col *= uLight;
@@ -151,6 +153,16 @@ export class VideoGhost {
   private reversed = false;
   private stutterTimer = Math.random() * 4;
   private disposed = false;
+  private readyForEncounter = false;
+  private readonly worldPosition = new THREE.Vector3();
+  private readonly worldQuaternion = new THREE.Quaternion();
+  private readonly worldEuler = new THREE.Euler();
+
+  /** 최소 한 번 표시할 준비를 마친 뒤에만 시선·마주침 연출을 진행합니다. */
+  public get ready(): boolean {
+    return !this.disposed && this.readyForEncounter &&
+      (this.fallback !== null || Boolean(this.entry?.ready && !this.entry.failed));
+  }
 
   constructor(role: GhostRole, pool: VideoClipPool, opts: VideoGhostOptions = {}) {
     this.role = role;
@@ -236,16 +248,17 @@ export class VideoGhost {
 
     if (this.fallback) {
       this.fallback.update(dt, elapsed);
+      this.readyForEncounter = true;
       return;
     }
     if (!this.plane || !this.entry) return;
 
-    const wp = new THREE.Vector3();
+    const wp = this.worldPosition;
     this.root.getWorldPosition(wp);
     if (this.billboardOn) {
       // 판이 항상 플레이어를 정면으로 보게 함 (세로축으로만 회전)
-      const parentYaw = new THREE.Euler().setFromQuaternion(
-        this.root.getWorldQuaternion(new THREE.Quaternion()),
+      const parentYaw = this.worldEuler.setFromQuaternion(
+        this.root.getWorldQuaternion(this.worldQuaternion),
         'YXZ'
       ).y;
       this.body.rotation.y = Math.atan2(ctx.cameraPos.x - wp.x, ctx.cameraPos.z - wp.z) - parentYaw;
@@ -263,10 +276,14 @@ export class VideoGhost {
     }
 
     const u = this.plane.material.uniforms;
-    u.uLight.value = ctx.light;
+    // 영상 셰이더는 Three의 주변광·카메라 잔광을 자동으로 받지 않습니다.
+    // 가까운 얼굴·윤곽은 읽히게 하되 먼 귀신은 기존 안개에 묻히도록 둡니다.
+    const eyeFill = 0.14 * (1 - THREE.MathUtils.smoothstep(wp.distanceTo(ctx.cameraPos), 1.5, 6));
+    u.uLight.value = Math.min(1, Math.max(ctx.light, 0.16) + eyeFill);
     u.uTime.value = elapsed;
     // 첫 프레임이 준비되기 전에는 보이지 않게 (검은 사각형 방지)
     u.uOpacity.value = this.entry.ready ? this.opacity : 0;
+    this.readyForEncounter = this.entry.ready;
     if (this.shadow) {
       // 바닥에 서 있을 때만 접지 그림자 (허공에 매달린 경우 제외)
       const onFloor = wp.y < 0.1;

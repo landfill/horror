@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 4444",
     "build": "tsc && vite build",
+    "test": "node scripts/test-world-performance.mjs && node scripts/test-ghost-visibility.mjs",
     "preview": "vite preview --port 4444"
   },
   "dependencies": {

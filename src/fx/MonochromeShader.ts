@@ -10,10 +10,10 @@ export const MonochromeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uGrain: { value: 0.09 },
-    uContrast: { value: 1.2 },
+    uGrain: { value: 0.035 },
+    uContrast: { value: 1.12 },
     uBrightness: { value: 1.0 },
-    uVignette: { value: 0.8 },
+    uVignette: { value: 0.42 },
     uDistort: { value: 0.0 },
     uTear: { value: 1.0 },
   },

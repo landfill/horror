@@ -38,6 +38,8 @@ class InescapableHorrorApp {
   private stepDistanceAccum = 0;
   private elapsed = 0;
   private lastTime = performance.now();
+  // 일시정지 화면은 마지막 프레임을 유지하고, 크기가 바뀔 때만 다시 그림.
+  private renderDirty = true;
   private subtitleTimeout: number | null = null;
   // 매 프레임 쓰는 벡터는 재사용 (모바일에서 GC로 화면이 멈칫하지 않게)
   private moveVec = new THREE.Vector3();
@@ -68,13 +70,16 @@ class InescapableHorrorApp {
       powerPreference: 'high-performance',
     });
     container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+      this.renderDirty = true;
+    });
 
-    // 극도로 어두운 주변광 (형광등 불빛 밖은 거의 칠흑)
-    const ambient = new THREE.AmbientLight(0x6a6a6a, 0.55);
+    // 형광등 밖에서도 문틀·사물의 윤곽을 읽을 수 있는 주변광.
+    const ambient = new THREE.AmbientLight(0x888888, 0.65);
     this.scene.add(ambient);
 
-    // 플레이어 시야 앞을 아주 희미하게 비추는 잔광 (완전 암전 시에도 코앞 실루엣만 어렴풋이 보이도록)
-    const eyeLight = new THREE.PointLight(0xffffff, 0.6, 5.0, 2.0);
+    // 가까운 사물의 윤곽을 드러내는 약한 잔광. 복도 끝까지 밝히지는 않음.
+    const eyeLight = new THREE.PointLight(0xffffff, 0.85, 6.0, 2.0);
     this.camera.add(eyeLight);
     this.scene.add(this.camera);
 
@@ -128,6 +133,7 @@ class InescapableHorrorApp {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
+    this.renderDirty = true;
   }
 
   private bindUI(): void {
@@ -175,6 +181,7 @@ class InescapableHorrorApp {
   }
 
   private togglePause(pause: boolean): void {
+    this.renderDirty = true;
     const modal = document.getElementById('pause-modal')!;
     if (pause) {
       this.isPaused = true;
@@ -249,6 +256,7 @@ class InescapableHorrorApp {
 
     const dt = Math.min(0.1, (now - this.lastTime) / 1000);
     this.lastTime = now;
+    if (this.isPaused && !this.onTitle && !this.renderDirty) return;
     this.elapsed += dt;
 
     if (!this.isPaused) {
@@ -301,6 +309,7 @@ class InescapableHorrorApp {
     this.monoPass.uniforms['uBrightness'].value = this.world.visualBrightness;
 
     this.composer.render();
+    this.renderDirty = false;
   }
 }
 
