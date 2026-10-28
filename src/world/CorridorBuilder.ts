@@ -16,6 +16,7 @@ import {
   plane,
 } from './Props';
 import type { SpotSpec } from './Anomalies';
+import type { PosterSpec } from './PosterReactions';
 import { addFootstepStory, addRoom404Story } from './StoryProps';
 
 /** 로컬 좌표의 형광등 위치와 세기 */
@@ -36,6 +37,8 @@ export interface BuiltPiece {
   light: SegmentLight;
   /** 이상 현상이 일어날 수 있는 자리 (로컬 좌표) */
   spots: SpotSpec[];
+  /** 가까이 지나갈 때 표정이 바뀔 수 있는 포스터. */
+  posters: PosterSpec[];
 }
 
 /**
@@ -49,6 +52,7 @@ const WALL_PROP_X = HALF - 0.32; // 벽에 붙여 놓는 바닥 소품의 x
 const KEEP_CLEAR_Z = -SEG_LEN + 1.6; // 이보다 깊은 곳(문틀 앞)에는 바닥 소품을 두지 않음
 const storyParams = new URLSearchParams(location.search);
 const DEBUG_STORY = storyParams.get('debug') === 'anomaly' ? storyParams.get('story') : null;
+const DEBUG_POSTERS = storyParams.get('debug') === 'posters';
 
 function wallMatFor(zone: ZoneKind): THREE.Material {
   return zone === 'school'
@@ -182,6 +186,7 @@ export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
   const group = new THREE.Group();
   const fixtures: FixtureSpec[] = [];
   const spots: SpotSpec[] = [];
+  const posters: PosterSpec[] = [];
 
   const floor = plane(SEG_W, SEG_LEN, variantOf(floorMatFor(zone), variant()));
   floor.rotation.x = -Math.PI / 2;
@@ -229,8 +234,8 @@ export function buildCorridor(zone: ZoneKind, lightFull: number): BuiltPiece {
     group.add(h);
   }
 
-  populateZoneDetails(group, zone, spots);
-  return { group, fixtures, spots, light };
+  populateZoneDetails(group, zone, spots, posters);
+  return { group, fixtures, spots, posters, light };
 }
 
 /**
@@ -318,7 +323,7 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
     });
   }
 
-  return { group, fixtures, spots, light };
+  return { group, fixtures, spots, posters: [], light };
 }
 
 function doorSpot(door: DoorUnit, x: number, z: number): SpotSpec {
@@ -426,7 +431,16 @@ function addFloorProp(group: THREE.Group, kind: PropKind, side: number, z: numbe
 
 const randSide = () => (Math.random() < 0.5 ? -1 : 1);
 
-export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: SpotSpec[]): void {
+function registerPoster(mesh: THREE.Mesh, variant: number, side: number, posters: PosterSpec[]): void {
+  mesh.name = 'wall-poster';
+  mesh.userData.posterVariant = variant;
+  posters.push({
+    x: side * (HALF - 0.05), y: mesh.position.y, z: mesh.position.z,
+    normalX: -side, normalZ: 0, mesh, variant,
+  });
+}
+
+export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: SpotSpec[], posters: PosterSpec[] = []): void {
   switch (zone) {
     case 'school': {
       // 교실 문(가끔 살짝 열림), 검은 창문, 사물함, 4:44 시계, 의자, 게시판
@@ -758,17 +772,19 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         if (!on) spots.push({ x: tv.group.position.x, z, kind: 'tv', apply: () => tv.setOn(true) });
       }
 
-      // 진열장 위 벽에 붙은 영화 포스터 (흐릿한 얼굴)
-      if (Math.random() < 0.5) {
-        const side = randSide();
-        const n = Math.floor(rand(1, 4));
-        const start = rand(-3, -7);
+      // 진열장 위 벽에 붙은 인물 포스터. 가까이 지나가면 한 장만 표정이 바뀔 수 있음.
+      if (DEBUG_POSTERS || Math.random() < 0.5) {
+        const side = DEBUG_POSTERS ? -1 : randSide();
+        const n = DEBUG_POSTERS ? 3 : Math.floor(rand(1, 4));
+        const start = DEBUG_POSTERS ? -4.5 : rand(-3, -7);
         for (let k = 0; k < n; k++) {
-          const poster = plane(0.4, 0.55, Mat.poster(Math.floor(Math.random() * POSTER_VARIANTS)));
+          const face = DEBUG_POSTERS ? 0 : Math.floor(Math.random() * POSTER_VARIANTS);
+          const poster = plane(0.4, 0.55, Mat.poster(face));
           poster.position.y = 2.5;
           onWall(poster, side, start - k * rand(1.6, 2.6), 0.02);
           poster.rotateZ(rand(-0.06, 0.06));
           group.add(poster);
+          registerPoster(poster, face, side, posters);
         }
       }
       // 반납 카트 (복도 가운데를 막지 않게 벽 쪽 진열장 틈)
@@ -793,19 +809,20 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       group.add(sign);
 
       // 같은 전단지가 줄지어 붙어 있음. 그중 하나가 나중에 조금 달라져 있음
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const start = rand(-3, -6);
-      const gap = rand(0.55, 0.75);
-      const posters = Math.floor(rand(2, 6));
+      const side = DEBUG_POSTERS ? -1 : Math.random() < 0.5 ? -1 : 1;
+      const start = DEBUG_POSTERS ? -4.5 : rand(-3, -6);
+      const gap = DEBUG_POSTERS ? 0.72 : rand(0.55, 0.75);
+      const posterCount = DEBUG_POSTERS ? 3 : Math.floor(rand(2, 6));
       const meshes: THREE.Mesh[] = [];
-      const face = Math.floor(Math.random() * POSTER_VARIANTS); // 한 줄은 모두 같은 사람
-      for (let k = 0; k < posters; k++) {
+      const face = DEBUG_POSTERS ? 0 : Math.floor(Math.random() * POSTER_VARIANTS); // 한 줄은 모두 같은 사람
+      for (let k = 0; k < posterCount; k++) {
         const poster = plane(0.42, 0.58, Mat.poster(face));
         poster.position.y = 1.48 + rand(-0.04, 0.04);
         onWall(poster, side, start - k * gap, 0.02);
         poster.rotateZ(rand(-0.05, 0.05));
         group.add(poster);
         meshes.push(poster);
+        registerPoster(poster, face, side, posters);
       }
       if (meshes.length >= 2) {
         const target = pick(meshes);

@@ -297,7 +297,8 @@ class InescapableHorrorApp {
         this.elapsed,
         this.camera.position,
         camForward,
-        isMoving
+        isMoving,
+        this.camera
       );
     }
 

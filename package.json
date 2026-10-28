@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --port 4444",
     "build": "tsc && vite build",
-    "test": "node scripts/test-world-performance.mjs && node scripts/test-ghost-visibility.mjs && node scripts/test-anomaly-stories.mjs && node scripts/test-story-props.mjs && node scripts/test-door-audio.mjs && node scripts/test-slipper-model.mjs",
+    "test": "node scripts/test-world-performance.mjs && node scripts/test-ghost-visibility.mjs && node scripts/test-anomaly-stories.mjs && node scripts/test-story-props.mjs && node scripts/test-door-audio.mjs && node scripts/test-slipper-model.mjs && node scripts/test-poster-reactions.mjs && node scripts/test-poster-photo.mjs",
     "preview": "vite preview --port 4444"
   },
   "dependencies": {

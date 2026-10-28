@@ -110,6 +110,7 @@ eyeWorld.scene.add(eyeRoot);
 eyeWorld.pieces = new Map([['eyes', { key: 'eyes', root: eyeRoot }]]);
 eyeWorld.haunts = { onCellDisposed() {} };
 eyeWorld.anomalies = { removePiece() {} };
+eyeWorld.posters = { removePiece() {} };
 eyeWorld.lights = { remove() {} };
 eyeWorld.removePiece('eyes');
 assert.equal(materialDisposals, 1);

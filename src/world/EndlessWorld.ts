@@ -25,6 +25,7 @@ import {
 } from './Maze';
 import { Haunts } from './Haunts';
 import { Anomalies } from './Anomalies';
+import { PosterReactions } from './PosterReactions';
 import { pick, rand, updateSigns } from './Textures';
 
 const BUILD_RADIUS = 2; // 이 맨해튼 거리 안의 교차로는 생성
@@ -67,6 +68,7 @@ export class EndlessWorld {
   private lights: LightPool;
   public readonly haunts: Haunts;
   public readonly anomalies: Anomalies;
+  public readonly posters = new PosterReactions();
 
   private player = new THREE.Vector3();
   private lastValid = new THREE.Vector3(0, 0, 0);
@@ -124,6 +126,7 @@ export class EndlessWorld {
     if (!p) return;
     this.haunts.onCellDisposed(key);
     this.anomalies.removePiece(key);
+    this.posters.removePiece(key);
     this.lights.remove(key);
     this.scene.remove(p.root);
     p.root.traverse((obj) => {
@@ -148,6 +151,7 @@ export class EndlessWorld {
     const toWorld = (x: number, z: number) => ({ x: c.x + x, z: c.z + z });
     this.addPiece(key, root, this.toFixtures(built.fixtures, toWorld));
     this.anomalies.add(key, built.spots, toWorld);
+    this.posters.add(key, built.posters, toWorld);
     this.haunts.onJunctionBuilt(key, i, j, zone, root);
   }
 
@@ -163,6 +167,7 @@ export class EndlessWorld {
     const toWorld = (x: number, z: number) => corridorToWorld(frame, x, z);
     this.addPiece(key, root, this.toFixtures(built.fixtures, toWorld));
     this.anomalies.add(key, built.spots, toWorld);
+    this.posters.add(key, built.posters, toWorld);
     this.haunts.onCorridorBuilt(key, zone, frame, built.group);
   }
 
@@ -369,7 +374,8 @@ export class EndlessWorld {
     elapsed: number,
     playerPos: THREE.Vector3,
     cameraForward: THREE.Vector3,
-    isMoving: boolean
+    isMoving: boolean,
+    viewCamera?: THREE.PerspectiveCamera
   ): void {
     // 화면 왜곡/밝기 서서히 복구
     this.visualDistort = Math.max(0, this.visualDistort - dt * 1.4);
@@ -411,6 +417,7 @@ export class EndlessWorld {
 
     // 6-1. 사물·공간의 이상 현상 (귀신이 보이는 동안에는 쉼)
     this.anomalies.update(dt, playerPos, cameraForward, this.haunts.presenceActive);
+    this.posters.update(dt, playerPos, cameraForward, isMoving, viewCamera);
 
     // 7. 등 뒤에서 반 박자 늦게 따라오는 젖은 발소리 (드물게)
     if (isMoving) {

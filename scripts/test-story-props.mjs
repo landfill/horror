@@ -416,3 +416,23 @@ test('404 stories enable the eyes before the door event without adding lights or
   built.group.traverse((object) => { if (object.isLight) extraLights++; });
   assert.equal(extraLights, 0);
 });
+
+test('wall posters register individual meshes and correct facing for passing reactions', () => {
+  for (const zone of ['subway', 'video']) {
+    const { buildCorridor } = builder('?debug=posters');
+    const built = seeded(814, () => buildCorridor(zone, 6));
+    assert.equal(built.posters.length, 3);
+    const meshes = new Set(built.posters.map((entry) => entry.mesh));
+    assert.equal(meshes.size, 3);
+    for (const entry of built.posters) {
+      assert.equal(entry.normalX, 1);
+      assert.equal(entry.normalZ, 0);
+      assert.equal(entry.variant, 0);
+      assert.equal(entry.y, entry.mesh.position.y);
+      assert.equal(entry.mesh.name, 'wall-poster');
+      assert.equal(entry.mesh.scale.x, zone === 'subway' ? .42 : .4);
+      assert.equal(entry.mesh.scale.y, zone === 'subway' ? .58 : .55);
+      assert.ok(entry.x > -maze.HALF, 'visibility point stays inside the corridor wall');
+    }
+  }
+});
