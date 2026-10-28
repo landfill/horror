@@ -3,6 +3,7 @@ import { Mat, POSTER_VARIANTS, SignPhrases, VARIANT_COUNT, pick, rand, signMater
 import { DIRS, Dir, DOOR_WALL_Z, HALF, SEG_H, SEG_LEN, SEG_W, ZoneKind, edgeOpen } from './Maze';
 import {
   DoorUnit,
+  DOOR_MOTION_SEC,
   LANDMARK_KINDS,
   PropKind,
   makeCeilingHole,
@@ -15,6 +16,7 @@ import {
   plane,
 } from './Props';
 import type { SpotSpec } from './Anomalies';
+import { addFootstepStory, addRoom404Story } from './StoryProps';
 
 /** 로컬 좌표의 형광등 위치와 세기 */
 export interface FixtureSpec {
@@ -45,6 +47,8 @@ export interface BuiltPiece {
  */
 const WALL_PROP_X = HALF - 0.32; // 벽에 붙여 놓는 바닥 소품의 x
 const KEEP_CLEAR_Z = -SEG_LEN + 1.6; // 이보다 깊은 곳(문틀 앞)에는 바닥 소품을 두지 않음
+const storyParams = new URLSearchParams(location.search);
+const DEBUG_STORY = storyParams.get('debug') === 'anomaly' ? storyParams.get('story') : null;
 
 function wallMatFor(zone: ZoneKind): THREE.Material {
   return zone === 'school'
@@ -319,7 +323,17 @@ export function buildJunction(i: number, j: number, zone: ZoneKind, lightFull: n
 
 function doorSpot(door: DoorUnit, x: number, z: number): SpotSpec {
   const initial = door.isOpen();
-  return { x, z, kind: 'door', apply: () => door.setOpen(!initial) };
+  return {
+    x, z, kind: 'door',
+    opening: !initial,
+    animatedDoor: true,
+    motionDuration: DOOR_MOTION_SEC,
+    update: (dt) => door.update?.(dt) ?? false,
+    apply: () => {
+      if (door.animateTo) door.animateTo(!initial);
+      else door.setOpen(!initial);
+    },
+  };
 }
 
 /**
@@ -392,7 +406,7 @@ function addHandprints(group: THREE.Group, side: number, z: number): void {
  * (벽 속으로 걸어 들어간 것처럼).
  */
 function addFootprints(group: THREE.Group, towardSide: number, z: number): void {
-  const m = plane(0.55, 1.1, Mat.decal('footprints'));
+  const m = plane(0.77, 1.54, Mat.decal('footprints'));
   m.renderOrder = 1;
   m.rotation.x = -Math.PI / 2;
   // 텍스처의 '위'(걸어가는 쪽)가 -z(복도 안쪽)를 향하고, 벽 쪽으로 비스듬히
@@ -416,8 +430,11 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
   switch (zone) {
     case 'school': {
       // 교실 문(가끔 살짝 열림), 검은 창문, 사물함, 4:44 시계, 의자, 게시판
-      for (const z of chooseSlots([-3.5, -9.0, -14.2], 0.8)) {
-        addWallDoor(group, spots, Mat.woodDoor(), -1, z, 0.2, 0.6);
+      const schoolDoors = DEBUG_STORY === 'footsteps' ? [-3.5, -7.8, -14.2] : chooseSlots([-3.5, -9.0, -14.2], 0.8);
+      const footstepDoorZ = DEBUG_STORY === 'footsteps' ? -7.8
+        : DEBUG_STORY !== 'room404' && schoolDoors.length > 0 && Math.random() < 0.3 ? pick(schoolDoors) : undefined;
+      for (const z of schoolDoors) {
+        addWallDoor(group, spots, Mat.woodDoor(), -1, z, z === footstepDoorZ ? 0 : 0.2, z === footstepDoorZ ? 0 : 0.6);
 
         // 복도 쪽 교실 창문 (안쪽은 칠흑, 가끔 희미하게 밝음)
         const win = plane(1.8, 0.95, Math.random() < 0.15 ? Mat.dimGlass() : Mat.black());
@@ -471,8 +488,9 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       // 복도에 나와 있는 의자. 가끔은 처음부터 벽을 보고 있음
       if (Math.random() < 0.3) {
         const chair = makeProp('chair');
-        const side = Math.random() < 0.5 ? -1 : 1;
+        let side = Math.random() < 0.5 ? -1 : 1;
         const z = rand(-4, KEEP_CLEAR_Z);
+        if (side === -1 && footstepDoorZ !== undefined && Math.abs(z - footstepDoorZ) < 1.5) side = 1;
         const r = Math.random();
         const facesWall = r < 0.15;
         const fallen = r > 0.7;
@@ -493,22 +511,25 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
       if (Math.random() < 0.5) addFloorProp(group, 'extinguisher', -1, pick([-6.2, -11.6, -16.2]) + rand(-0.2, 0.2), HALF - 0.14);
       // 교실 창문 옆 손자국, 교실 문으로 이어지는 젖은 발자국
       if (Math.random() < 0.3) addHandprints(group, -1, rand(-5, -16));
-      if (Math.random() < 0.3) addFootprints(group, -1, rand(-4, -14));
+      if (footstepDoorZ !== undefined) spots.push(addFootstepStory(group, -1, footstepDoorZ));
       break;
     }
 
     case 'apt404': {
       // 늘어선 철문(전부 404호), 부적, 문 앞의 물건들
-      const doors: { side: number; z: number }[] = [];
+      const doors: { side: number; z: number; door: DoorUnit; plaque: boolean }[] = [];
       for (const z of [-3.2, -7.8, -12.4, -15.8]) {
         for (const side of [-1, 1]) {
-          if (Math.random() > 0.8) continue;
-          const dz = z + rand(-0.3, 0.3);
-          addWallDoor(group, spots, Mat.steelDoor(), side, dz, 0.08, 0.35);
-          doors.push({ side, z: dz });
+          const forced = (DEBUG_STORY === 'room404' || DEBUG_STORY === 'footsteps') && side === -1 && z === -7.8;
+          if (!forced && Math.random() > 0.8) continue;
+          const dz = forced ? z : z + rand(-0.3, 0.3);
+          // 사건에 쓸 문을 고른 뒤 나머지 문에만 단독 개폐 이상 현상을 등록합니다.
+          const door = addWallDoor(group, spots, Mat.steelDoor(), side, dz, 0.08, 0);
+          const plaque = forced || Math.random() < 0.9;
+          doors.push({ side, z: dz, door, plaque });
 
           // 호수판 (전부 404호, 가끔 떨어져 나감)
-          if (Math.random() < 0.9) {
+          if (plaque) {
             const plate = plane(0.28, 0.12, Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true })
             );
             plate.position.y = 2.2;
@@ -533,35 +554,57 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         }
       }
 
-      // 문 앞에 가지런한 실내화: 처음부터 있거나, 나중에 생기거나
-      if (doors.length > 0) {
-        const d = pick(doors);
-        if (d.z > KEEP_CLEAR_Z) {
-          const shoes = makeProp('shoes');
-          placeOnFloor(shoes, d.side, d.z, 'corridor');
-          shoes.position.x = d.side * (HALF - 0.25);
-          group.add(shoes);
-          if (Math.random() < 0.12) {
-            // 처음부터 놓여 있음
-          } else {
-            shoes.visible = false;
-            spots.push({ x: d.side * (HALF - 0.25), z: d.z, kind: 'shoes', apply: () => (shoes.visible = true) });
-          }
+      const storyDoors = doors.filter((d) => d.z > KEEP_CLEAR_Z + 1.4 && d.z < -1.4);
+      const forcedDoor = storyDoors.find((d) => d.side === -1 && d.z === -7.8);
+      const roomDoor = DEBUG_STORY === 'footsteps' ? undefined
+        : DEBUG_STORY === 'room404' ? forcedDoor : storyDoors.length > 0 ? pick(storyDoors) : undefined;
+      const footDoors = storyDoors.filter((d) => d !== roomDoor);
+      const footDoor = DEBUG_STORY === 'room404' ? undefined
+        : DEBUG_STORY === 'footsteps' ? forcedDoor
+          : footDoors.length > 0 && Math.random() < 0.25 ? pick(footDoors) : undefined;
+
+      if (roomDoor) {
+        // 이 문에는 실내화와 연결된 두 단계만 적용합니다. 다른 단독 사건과 중복하지 않음.
+        spots.push(addRoom404Story(group, roomDoor.door, roomDoor.side, roomDoor.z));
+        if (!roomDoor.plaque) {
+          const plate = plane(0.28, 0.12, Mat.label('404', { bg: '#1a1a1a', fg: '#d8d8d2', border: true }));
+          plate.position.y = 2.2;
+          onWall(plate, roomDoor.side, roomDoor.z, 0.03);
+          group.add(plate);
+        }
+      }
+      if (footDoor) {
+        footDoor.door.setOpen(false);
+        spots.push(addFootstepStory(group, footDoor.side, footDoor.z));
+      }
+      for (const d of doors) {
+        if (d !== roomDoor && d !== footDoor && Math.random() < 0.35) {
+          spots.push(doorSpot(d.door, d.side * (HALF - 0.6), d.z));
         }
       }
 
+      const clearOfStory = (side: number, z: number) =>
+        ![roomDoor, footDoor].some((d) => d && d.side === side && Math.abs(d.z - z) < 1.5);
+
       // 택배 상자, 기대 놓은 우산
       if (Math.random() < 0.25) {
-        const b = makeProp('box');
-        placeOnFloor(b, Math.random() < 0.5 ? -1 : 1, rand(-2, KEEP_CLEAR_Z), 'along');
-        group.add(b);
+        const side = randSide();
+        const z = rand(-2, KEEP_CLEAR_Z);
+        if (clearOfStory(side, z)) {
+          const b = makeProp('box');
+          placeOnFloor(b, side, z, 'along');
+          group.add(b);
+        }
       }
       if (Math.random() < 0.18) {
-        const u = makeProp('umbrella');
-        const side = Math.random() < 0.5 ? -1 : 1;
-        placeOnFloor(u, side, rand(-2, KEEP_CLEAR_Z), 'corridor');
-        u.position.x = side * (HALF - 0.25);
-        group.add(u);
+        const side = randSide();
+        const z = rand(-2, KEEP_CLEAR_Z);
+        if (clearOfStory(side, z)) {
+          const u = makeProp('umbrella');
+          placeOnFloor(u, side, z, 'corridor');
+          u.position.x = side * (HALF - 0.25);
+          group.add(u);
+        }
       }
 
       // 복도 입구 벽에 박힌 우편함 (칸마다 404호, 꽂힌 채 쌓인 전단지)
@@ -578,16 +621,11 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const n = Math.floor(rand(1, 4));
         for (let k = 0; k < n; k++) {
           const z = d.z + 0.75 + k * 0.42;
-          if (z > -0.6 || z < KEEP_CLEAR_Z) continue;
+          if (z > -0.6 || z < KEEP_CLEAR_Z || !clearOfStory(d.side, z)) continue;
           addFloorProp(group, 'bag', d.side, z, HALF - 0.3);
         }
       }
       if (Math.random() < 0.25) addHandprints(group, randSide(), rand(-3, -15));
-      if (doors.length > 0 && Math.random() < 0.25) {
-        // 어느 철문 앞에서 끝나는 젖은 발자국
-        const d = pick(doors);
-        addFootprints(group, d.side, d.z + 1.0);
-      }
       break;
     }
 
@@ -610,7 +648,7 @@ export function populateZoneDetails(group: THREE.Group, zone: ZoneKind, spots: S
         const closet = makeSlidingCloset(rand(1.2, 1.6), Math.random() < 0.5);
         onWall(closet.group, side, z, 0.02);
         group.add(closet.group);
-        if (!closet.isOpen()) spots.push({ x: side * (HALF - 0.6), z, kind: 'door', apply: () => closet.setOpen(true) });
+        if (!closet.isOpen()) spots.push(doorSpot(closet, side * (HALF - 0.6), z));
       }
 
       // 족자: 한 글자

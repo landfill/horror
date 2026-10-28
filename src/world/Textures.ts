@@ -580,7 +580,7 @@ export const Tex = {
       speckle(c, w, h, 400, 0.15);
     }, false),
 
-  /** 젖은 맨발 자국 세 걸음 (아래에서 위로 걸어감). 배경은 투명. 0.55m × 1.1m 평면에 붙임 */
+  /** 젖은 맨발 자국 세 걸음 (아래에서 위로 걸어감). 배경은 투명. 0.77m × 1.54m 평면에 붙임 */
   footprints: () =>
     tex('footprints', 128, 256, (c, w, h) => {
       c.clearRect(0, 0, w, h);
@@ -604,6 +604,36 @@ export const Tex = {
         for (let t = 0; t < 5; t++) {
           c.beginPath();
           c.arc((left ? 1 : -1) * (t * 2.6 - 5), -14 + Math.abs(t - 1) * 0.7, t === 0 ? 2.6 : 1.8, 0, Math.PI * 2);
+          c.fill();
+        }
+        c.restore();
+      }
+    }, false),
+
+  /** 한 단계씩 드러낼 젖은 맨발 한 쌍. 발끝은 텍스처 위쪽, 좌우 발은 반 걸음 어긋남. */
+  footprintPair: () =>
+    tex('footprintPair', 128, 256, (c, w, h) => {
+      c.clearRect(0, 0, w, h);
+      for (let i = 0; i < 2; i++) {
+        const left = i === 0;
+        c.save();
+        c.translate(w / 2 + (left ? -22 : 22), left ? 184 : 88);
+        c.rotate(left ? -0.06 : 0.06);
+        c.scale(1.7, 1.7);
+        c.fillStyle = left ? 'rgba(8,8,8,0.82)' : 'rgba(8,8,8,0.76)';
+        c.beginPath();
+        c.ellipse(0, 0, 8, 11, 0, 0, Math.PI * 2); // 앞꿈치
+        c.fill();
+        c.beginPath();
+        c.ellipse(left ? -2.5 : 2.5, 10, 3.8, 9, 0, 0, Math.PI * 2); // 발바닥 바깥쪽
+        c.fill();
+        c.beginPath();
+        c.ellipse(0, 21, 5.5, 7, 0, 0, Math.PI * 2); // 뒤꿈치
+        c.fill();
+        for (let toe = 0; toe < 5; toe++) {
+          const x = (left ? 1 : -1) * (5.5 - toe * 3.0);
+          c.beginPath();
+          c.arc(x, -15 + toe * 0.7, toe === 0 ? 2.8 : 2.0 - toe * 0.15, 0, Math.PI * 2);
           c.fill();
         }
         c.restore();
@@ -934,7 +964,7 @@ export const Mat = {
   plain: (v: number) => lambert(`plain:${v}`, null, v),
   black: () => basic('black', 0x000000),
   /** 벽·바닥에 붙이는 투명 자국 (손자국, 발자국) */
-  decal: (name: 'handprints' | 'footprints') =>
+  decal: (name: 'handprints' | 'footprints' | 'footprintPair') =>
     lambert(`decal:${name}`, Tex[name], 0xffffff, {
       transparent: true,
       depthWrite: false,

@@ -309,14 +309,17 @@ export class SoundManager {
 
   /**
    * 끼익거리는 소리 (문, 의자 끌기, 녹슨 경첩)
+   * durationSeconds를 주면 문이 움직이는 동안 천천히 이어지는 경첩 소리.
+   * 생략하면 기존의 짧은 환경음으로 재생합니다.
    */
-  public playCreak(pos?: SpatialPos, label = '[문이 끼익거림]'): void {
+  public playCreak(pos?: SpatialPos, label = '[문이 끼익거림]', durationSeconds?: number): void {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const dest = this.createPanner(pos);
     this.emitSubtitle(label);
 
-    const dur = 0.85 + Math.random() * 0.6;
+    const sustained = durationSeconds !== undefined && Number.isFinite(durationSeconds) && durationSeconds > 0;
+    const dur = sustained ? durationSeconds : 0.85 + Math.random() * 0.6;
     const carrier = this.ctx.createOscillator();
     const mod = this.ctx.createOscillator();
     const modGain = this.ctx.createGain();
@@ -326,26 +329,55 @@ export class SoundManager {
     const baseFreq = 290 + Math.random() * 190;
     carrier.type = 'sawtooth';
     carrier.frequency.setValueAtTime(baseFreq, now);
-    carrier.frequency.linearRampToValueAtTime(baseFreq * 0.62, now + dur * 0.5);
-    carrier.frequency.linearRampToValueAtTime(baseFreq * 1.18, now + dur);
+    if (sustained) {
+      // 천천히 하중이 걸렸다 풀리는 경첩: 길게 재생해도 사이렌처럼 치솟지 않게.
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 0.92, now + dur * 0.24);
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 1.03, now + dur * 0.56);
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 0.82, now + dur * 0.8);
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 0.88, now + dur);
+    } else {
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 0.62, now + dur * 0.5);
+      carrier.frequency.linearRampToValueAtTime(baseFreq * 1.18, now + dur);
+    }
 
     mod.type = 'sine';
-    mod.frequency.setValueAtTime(18 + Math.random() * 12, now);
-    modGain.gain.setValueAtTime(65, now);
+    mod.frequency.setValueAtTime(sustained ? 5.5 + Math.random() * 2.5 : 18 + Math.random() * 12, now);
+    modGain.gain.setValueAtTime(sustained ? 12 : 65, now);
 
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(780, now);
     filter.Q.value = 6;
 
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.22, now + 0.08);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    if (sustained) {
+      const attack = Math.min(0.22, dur * 0.18);
+      const release = Math.min(0.35, dur * 0.2);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + attack);
+      gain.gain.linearRampToValueAtTime(0.12, now + dur * 0.38);
+      gain.gain.linearRampToValueAtTime(0.17, now + dur * 0.68);
+      gain.gain.linearRampToValueAtTime(0.1, now + dur - release);
+      gain.gain.linearRampToValueAtTime(0, now + dur);
+    } else {
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.22, now + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    }
 
     mod.connect(modGain);
     modGain.connect(carrier.frequency);
     carrier.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+
+    // 개인 효과음 노드만 끊습니다. 공유 버스와 그 뒤의 잔향은 계속 살아 있습니다.
+    carrier.onended = () => {
+      carrier.disconnect();
+      mod.disconnect();
+      modGain.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+      if (dest !== this.fxBus && dest !== this.masterGain) dest.disconnect();
+    };
 
     carrier.start(now);
     mod.start(now);

@@ -10,6 +10,7 @@ const bundle = await build({
   stdin: {
     contents: `export { LightPool, LIGHT_FULL } from './src/world/Lighting.ts';
       export { EndlessWorld } from './src/world/EndlessWorld.ts';
+      export { makeSwingDoor } from './src/world/Props.ts';
       export { GRID } from './src/world/Maze.ts';`,
     resolveDir: fileURLToPath(new URL('../', import.meta.url)),
   },
@@ -24,7 +25,7 @@ const bundle = await build({
     },
   }],
 });
-const { LightPool, LIGHT_FULL, EndlessWorld, GRID } = await import(
+const { LightPool, LIGHT_FULL, EndlessWorld, GRID, makeSwingDoor } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
 );
 
@@ -93,4 +94,25 @@ assert.equal(world.loadedNodes.size, 13, 'distant teleport rebuilds and prunes t
 assert.equal(world.streamedNodeI, -8);
 assert.equal(world.streamedNodeJ, 6);
 assert.ok(removals > 0, 'distant pieces are disposed after teleport');
-console.log('World performance regressions passed: active light slots, light sampling, stream boundaries and teleport.');
+// A streamed-out doorway releases its independent fade material once, retaining cached eye geometry.
+const eyeWorld = Object.create(EndlessWorld.prototype);
+const eyeRoot = new THREE.Group();
+const eyeDoor = makeSwingDoor(new THREE.MeshBasicMaterial(), false);
+eyeDoor.setEyes(true);
+eyeRoot.add(eyeDoor.group);
+const eyeMeshes = eyeDoor.group.getObjectByName('door-eyes').children;
+let materialDisposals = 0;
+let geometryDisposals = 0;
+eyeMeshes[0].material.addEventListener('dispose', () => materialDisposals++);
+eyeMeshes[0].geometry.addEventListener('dispose', () => geometryDisposals++);
+eyeWorld.scene = new THREE.Scene();
+eyeWorld.scene.add(eyeRoot);
+eyeWorld.pieces = new Map([['eyes', { key: 'eyes', root: eyeRoot }]]);
+eyeWorld.haunts = { onCellDisposed() {} };
+eyeWorld.anomalies = { removePiece() {} };
+eyeWorld.lights = { remove() {} };
+eyeWorld.removePiece('eyes');
+assert.equal(materialDisposals, 1);
+assert.equal(geometryDisposals, 0);
+assert.equal(eyeWorld.pieces.size, 0);
+console.log('World performance regressions passed: light slots, streaming, teleport and eye-material cleanup.');

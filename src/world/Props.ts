@@ -67,6 +67,101 @@ export function plane(w: number, h: number, mat: THREE.Material): THREE.Mesh {
   return m;
 }
 
+interface SlipperParts {
+  sole: THREE.BufferGeometry;
+  insole: THREE.BufferGeometry;
+  upper: THREE.BufferGeometry;
+  upperMaterial: THREE.MeshLambertMaterial;
+}
+let slipperParts: SlipperParts | null = null;
+
+/** 밑창·안창·뒤가 열린 갑피를 한 번 만들어 모든 실내화가 공유합니다. 앞쪽은 +z. */
+function getSlipperParts(): SlipperParts {
+  if (slipperParts) return slipperParts;
+  const outline = new THREE.Shape();
+  outline.moveTo(0, -0.155);
+  outline.bezierCurveTo(-0.042, -0.155, -0.057, -0.139, -0.057, -0.108);
+  outline.bezierCurveTo(-0.057, -0.061, -0.058, 0.016, -0.063, 0.068);
+  outline.bezierCurveTo(-0.071, 0.122, -0.05, 0.155, 0, 0.155);
+  outline.bezierCurveTo(0.05, 0.155, 0.071, 0.122, 0.063, 0.068);
+  outline.bezierCurveTo(0.058, 0.016, 0.057, -0.061, 0.057, -0.108);
+  outline.bezierCurveTo(0.057, -0.139, 0.042, -0.155, 0, -0.155);
+
+  // 얇고 모서리가 둥근 고무 밑창. 0~18mm 높이로 바닥에 닿습니다.
+  const sole = shared(new THREE.ExtrudeGeometry(outline, {
+    curveSegments: 4, steps: 1, depth: 0.012,
+    bevelEnabled: true, bevelSegments: 1, bevelSize: 0.003, bevelThickness: 0.003,
+  }));
+  sole.rotateX(Math.PI / 2);
+  sole.translate(0, 0.015, 0);
+
+  // 창 테두리보다 작은 어두운 안창. 뒤꿈치 쪽은 갑피로 덮지 않습니다.
+  const insole = shared(new THREE.ShapeGeometry(outline, 4));
+  insole.scale(0.86, 0.93, 1);
+  insole.rotateX(-Math.PI / 2);
+  insole.rotateY(Math.PI);
+  insole.translate(0, 0.019, 0);
+
+  // 발등을 덮는 낮은 곡면. 뒷면을 막지 않고 안쪽 면까지 만들어 실제 빈 입구를 남깁니다.
+  const rows = [
+    { z: -0.035, width: 0.057, height: 0.074 },
+    { z: 0.012, width: 0.061, height: 0.078 },
+    { z: 0.065, width: 0.062, height: 0.072 },
+    { z: 0.112, width: 0.054, height: 0.048 },
+    { z: 0.142, width: 0.027, height: 0.020 },
+    { z: 0.151, width: 0.006, height: 0.005 },
+  ];
+  const segments = 8;
+  const stride = segments + 1;
+  const surfaceSize = rows.length * stride;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  for (let inner = 0; inner < 2; inner++) {
+    for (let row = 0; row < rows.length; row++) {
+      const r = rows[row];
+      const width = r.width - inner * 0.003;
+      const height = r.height - inner * 0.003;
+      for (let j = 0; j <= segments; j++) {
+        const angle = (j / segments) * Math.PI;
+        positions.push(-width * Math.cos(angle), 0.019 + height * Math.sin(angle), r.z);
+        // 입구 테두리와 발등의 접힌 부분은 조금 때가 탄 색, 내부는 어둡게.
+        const shade = inner ? 0.28 : row === 0 ? 0.72 : row === 2 ? 0.86 : 1;
+        colors.push(shade, shade, shade);
+      }
+    }
+    const offset = inner * surfaceSize;
+    for (let row = 0; row < rows.length - 1; row++) {
+      for (let j = 0; j < segments; j++) {
+        const a = offset + row * stride + j;
+        const b = a + stride;
+        if (inner) indices.push(a, a + 1, b, a + 1, b + 1, b);
+        else indices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+  }
+  // 입구는 곡면 테두리만 연결하고 가운데를 비워 둡니다.
+  for (let j = 0; j < segments; j++) {
+    indices.push(j, j + 1, surfaceSize + j, j + 1, surfaceSize + j + 1, surfaceSize + j);
+  }
+  // 발가락 끝은 닫혀 있지만 뒤꿈치는 열려 있는 실내화 형태.
+  const cap = positions.length / 3;
+  positions.push(0, 0.019, rows[rows.length - 1].z);
+  colors.push(1, 1, 1);
+  const front = (rows.length - 1) * stride;
+  for (let j = 0; j < segments; j++) indices.push(cap, front + j + 1, front + j);
+  const upper = shared(new THREE.BufferGeometry());
+  upper.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  upper.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  upper.setIndex(indices);
+  upper.computeVertexNormals();
+  slipperParts = {
+    sole, insole, upper,
+    upperMaterial: new THREE.MeshLambertMaterial({ color: 0xc8c6bc, vertexColors: true }),
+  };
+  return slipperParts;
+}
+
 export function makeProp(kind: PropKind): THREE.Group {
   const g = new THREE.Group();
   switch (kind) {
@@ -84,11 +179,19 @@ export function makeProp(kind: PropKind): THREE.Group {
       break;
     }
     case 'shoes': {
-      // 가지런히 놓인 흰 실내화 한 켤레
-      const pale = Mat.plain(0xbdbdb8);
-      for (const x of [-0.075, 0.075]) {
-        g.add(box(0.095, 0.06, 0.25, pale, x, 0.03, 0));
-        g.add(box(0.095, 0.05, 0.09, pale, x, 0.08, -0.08));
+      const parts = getSlipperParts();
+      for (const x of [-0.087, 0.087]) {
+        const slipper = new THREE.Group();
+        slipper.name = x < 0 ? 'slipper-left' : 'slipper-right';
+        slipper.position.x = x;
+        const sole = new THREE.Mesh(parts.sole, Mat.plain(0x96958d));
+        sole.name = 'slipper-sole';
+        const insole = new THREE.Mesh(parts.insole, Mat.plain(0x59574f));
+        insole.name = 'slipper-insole';
+        const upper = new THREE.Mesh(parts.upper, parts.upperMaterial);
+        upper.name = 'slipper-upper';
+        slipper.add(sole, insole, upper);
+        g.add(slipper);
       }
       break;
     }
@@ -180,8 +283,108 @@ export function makeProp(kind: PropKind): THREE.Group {
 
 export interface DoorUnit {
   group: THREE.Group;
+  /** 애니메이션 중에는 도달할 목표 상태를 반환합니다. */
   isOpen: () => boolean;
+  /** 생성·초기 배치용: 움직임 없이 즉시 적용합니다. */
   setOpen: (open: boolean) => void;
+  animateTo?: (open: boolean) => void;
+  /** 움직이는 동안 true, 목표에 도달하면 false. */
+  update?: (dt: number) => boolean;
+  isMoving?: () => boolean;
+  /** 문 뒤의 두 눈. 필요한 문에서만 처음 한 번 생성하며, 이후에는 표시 상태만 바꿉니다. */
+  setEyes?: (enabled: boolean) => void;
+}
+
+export const DOOR_MOTION_SEC = 2.8;
+
+let doorEyeGeometry: THREE.BufferGeometry | null = null;
+
+/** 얼굴 없이 눈의 윤곽·검은 동공·작은 반사점만 가진 공유 평면 지오메트리. */
+function getDoorEyeGeometry(): THREE.BufferGeometry {
+  if (doorEyeGeometry) return doorEyeGeometry;
+  const outline = new THREE.Shape();
+  outline.moveTo(-0.028, 0);
+  outline.quadraticCurveTo(0, 0.018, 0.028, 0);
+  outline.quadraticCurveTo(0, -0.014, -0.028, 0);
+  const pupilHole = new THREE.Path();
+  pupilHole.absellipse(0, 0, 0.0037, 0.0058, 0, Math.PI * 2, true, 0);
+  outline.holes.push(pupilHole);
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const append = (geometry: THREE.BufferGeometry, tint: number) => {
+    const offset = positions.length / 3;
+    const position = geometry.getAttribute('position');
+    const color = new THREE.Color(tint);
+    for (let i = 0; i < position.count; i++) {
+      positions.push(position.getX(i), position.getY(i), position.getZ(i));
+      colors.push(color.r, color.g, color.b);
+    }
+    const index = geometry.getIndex();
+    if (index) {
+      for (let i = 0; i < index.count; i++) indices.push(offset + index.getX(i));
+    } else {
+      for (let i = 0; i < position.count; i++) indices.push(offset + i);
+    }
+    geometry.dispose();
+  };
+  append(new THREE.ShapeGeometry(outline, 8), 0x8d8d87);
+  // 동공 자리에는 흰 면을 만들지 않아 투명도 변화 때도 검게 남습니다.
+  const pupil = new THREE.CircleGeometry(1, 16);
+  pupil.scale(0.0037, 0.0058, 1);
+  append(pupil, 0x080808);
+  const catchlight = new THREE.CircleGeometry(0.0011, 6);
+  catchlight.translate(-0.0012, 0.0022, 0.0006);
+  append(catchlight, 0xb7b7b1);
+  doorEyeGeometry = shared(new THREE.BufferGeometry());
+  doorEyeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  doorEyeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  doorEyeGeometry.setIndex(indices);
+  doorEyeGeometry.computeVertexNormals();
+  return doorEyeGeometry;
+}
+
+/** 문 종류와 관계없이 같은 속도로 천천히 출발하고 멈춥니다. */
+function doorMotion(group: THREE.Group, open: boolean, apply: (progress: number) => void): DoorUnit {
+  let state = open;
+  let progress = open ? 1 : 0;
+  let from = progress;
+  let target = progress;
+  let elapsed = 0;
+  let moving = false;
+  apply(progress);
+  return {
+    group,
+    isOpen: () => state,
+    isMoving: () => moving,
+    setOpen: (next) => {
+      state = next;
+      progress = from = target = next ? 1 : 0;
+      elapsed = 0;
+      moving = false;
+      apply(progress);
+    },
+    animateTo: (next) => {
+      const nextTarget = next ? 1 : 0;
+      if (nextTarget === target && moving) return;
+      state = next;
+      from = progress;
+      target = nextTarget;
+      elapsed = 0;
+      moving = from !== target;
+    },
+    update: (dt) => {
+      if (!moving || !Number.isFinite(dt) || dt <= 0) return moving;
+      elapsed = Math.min(DOOR_MOTION_SEC, elapsed + dt);
+      const t = elapsed / DOOR_MOTION_SEC;
+      const eased = t * t * (3 - 2 * t);
+      progress = THREE.MathUtils.lerp(from, target, eased);
+      apply(progress);
+      moving = elapsed < DOOR_MOTION_SEC;
+      return moving;
+    },
+  };
 }
 
 /**
@@ -192,34 +395,65 @@ export interface DoorUnit {
 export function makeSwingDoor(mat: THREE.Material, open: boolean, w = 0.95, h = 2.05): DoorUnit {
   const group = new THREE.Group();
 
-  const closed = plane(w, h, mat);
-  closed.position.set(0, h / 2, 0.02);
-
   const voidMesh = plane(w, h, Mat.black());
   voidMesh.position.set(0, h / 2, 0.01);
 
   const pivot = new THREE.Group();
+  pivot.name = 'door-hinge';
   pivot.position.set(w / 2, 0, 0.03);
   const leaf = boxMesh(w, h, 0.04, mat);
+  leaf.name = 'door-leaf';
   leaf.position.set(-w / 2, h / 2, 0.02);
   pivot.add(leaf);
-  pivot.rotation.y = rand(0.3, 0.42);
+  const openAngle = rand(0.3, 0.42);
 
-  group.add(closed, voidMesh, pivot);
-
-  let state = open;
-  const apply = () => {
-    closed.visible = !state;
-    voidMesh.visible = state;
-    pivot.visible = state;
+  let openness = open ? 1 : 0;
+  let eyesEnabled = false;
+  let eyes: THREE.Group | null = null;
+  let eyeMaterial: THREE.MeshBasicMaterial | null = null;
+  const updateEyes = () => {
+    if (!eyes || !eyeMaterial) return;
+    const reveal = eyesEnabled ? THREE.MathUtils.smoothstep(openness, 0.45, 0.95) : 0;
+    eyes.visible = reveal > 0;
+    eyeMaterial.opacity = reveal * 0.72;
   };
-  apply();
+
+  // 닫힌 평면과 열린 문짝을 교체하지 않고 같은 문짝을 경첩 중심으로 회전합니다.
+  group.add(voidMesh, pivot);
+  const motion = doorMotion(group, open, (progress) => {
+    openness = progress;
+    pivot.rotation.y = openAngle * progress;
+    // 닫힌 문 뒤의 완전히 가려진 배경은 드로콜을 쓰지 않게 합니다.
+    voidMesh.visible = progress > 0;
+    updateEyes();
+  });
   return {
-    group,
-    isOpen: () => state,
-    setOpen: (o: boolean) => {
-      state = o;
-      apply();
+    ...motion,
+    setEyes: (enabled) => {
+      eyesEnabled = enabled;
+      if (enabled && !eyes) {
+        eyes = new THREE.Group();
+        eyes.name = 'door-eyes';
+        // 검은 배경(z=.01) 앞, 실제 문짝(z>=.03) 뒤. 문짝과 벽이 눈을 가립니다.
+        eyes.position.set(-w * 0.3, Math.min(1.55, h - 0.4), 0.017);
+        eyeMaterial = new THREE.MeshBasicMaterial({
+          vertexColors: true, transparent: true, opacity: 0,
+          depthTest: true, depthWrite: false, fog: true,
+        });
+        eyeMaterial.name = 'door-eyes-material';
+        for (let i = 0; i < 2; i++) {
+          const eye = new THREE.Mesh(getDoorEyeGeometry(), eyeMaterial);
+          eye.name = i === 0 ? 'door-eye-left' : 'door-eye-right';
+          // 어둠 속에서도 두 눈의 형태를 읽을 수 있도록 크기와 간격을 함께 확대.
+          eye.scale.set(2, 2, 1);
+          eye.position.x = i === 0 ? -0.084 : 0.084;
+          // 두 메시가 같은 문 전용 재질을 공유하므로 해제 책임은 하나에만 둡니다.
+          if (i === 0) eye.userData.disposeMaterial = true;
+          eyes.add(eye);
+        }
+        group.add(eyes);
+      }
+      updateEyes();
     },
   };
 }
@@ -233,25 +467,16 @@ export function makeSlidingCloset(w: number, open: boolean): DoorUnit {
   const voidMesh = plane(w, h, Mat.black());
   voidMesh.position.set(0, h / 2, 0.01);
   const panel = boxMesh(w / 2, h, 0.03, Mat.shoji());
+  panel.name = 'closet-moving-panel';
   panel.position.y = h / 2;
   const panel2 = boxMesh(w / 2, h, 0.03, Mat.shoji());
   panel2.position.set(w / 4, h / 2, 0.035);
   group.add(voidMesh, panel, panel2);
 
-  let state = open;
-  const apply = () => {
+  return doorMotion(group, open, (progress) => {
     // 닫힘: 두 판이 틈을 덮음 / 열림: 한 판이 다른 판 앞으로 밀려 틈의 절반이 드러남
-    panel.position.set(state ? w / 4 : -w / 4, h / 2, 0.025);
-  };
-  apply();
-  return {
-    group,
-    isOpen: () => state,
-    setOpen: (o: boolean) => {
-      state = o;
-      apply();
-    },
-  };
+    panel.position.set(THREE.MathUtils.lerp(-w / 4, w / 4, progress), h / 2, 0.025);
+  });
 }
 
 /** 브라운관 TV. 화면 재질을 바꿔 켜고 끔 */

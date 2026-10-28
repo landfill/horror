@@ -130,8 +130,8 @@ export class EndlessWorld {
       if (obj instanceof THREE.Mesh) {
         // 소품끼리 함께 쓰는 지오메트리(Props의 shared)는 남겨 둠
         if (!obj.geometry.userData.shared) obj.geometry.dispose();
-        // 형광등 재질만 기구마다 따로 만들었으므로 해제 (나머지는 캐시된 공유 재질)
-        if (obj.userData.fixture) (obj.material as THREE.Material).dispose();
+        // 형광등과 문틈 눈의 독립적인 페이드 재질만 해제. 공유 재질은 유지.
+        if (obj.userData.fixture || obj.userData.disposeMaterial) (obj.material as THREE.Material).dispose();
       }
     });
     this.pieces.delete(key);
