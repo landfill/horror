@@ -74,10 +74,10 @@ export class PosterReactions {
       } else {
         active.elapsed += dt;
         const t = active.elapsed;
-        const duration = active.kind === 'blink' ? 0.4 : 1.95;
+        const duration = active.kind === 'blink' ? 0.72 : 1.95;
         if (t >= duration) this.finish();
         else if (active.kind === 'blink') {
-          this.setFrame(t < 0.08 ? 'blink-half' : t < 0.20 ? 'blink' : t < 0.30 ? 'blink-half' : 'neutral');
+          this.setFrame(t < 0.08 ? 'blink-half' : t < 0.44 ? 'blink' : t < 0.60 ? 'blink-half' : 'neutral');
         } else {
           this.setFrame(t < 0.2 ? 'smile-half' : t < 1.45 ? 'smile' : t < 1.75 ? 'smile-half' : 'neutral');
         }

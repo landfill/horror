@@ -6,8 +6,8 @@ export const POSTER_PHOTO_HEIGHT = 124;
 export const POSTER_PHOTO_SOURCE = '/posters/corridor-woman.png';
 export const POSTER_PHOTO_CROP = { x: 32, y: 50, width: 124, height: 120 };
 export const POSTER_PHOTO_FEATURES = {
-  eyes: [{ x: 53.7, y: 63, rx: 10, ry: 5.8 }, { x: 83.6, y: 63, rx: 9, ry: 5.8 }],
-  mouth: { x: 75, y: 104, rx: 14, ry: 12 },
+  eyes: [{ x: 49, y: 67.5, rx: 11.5, ry: 8.5 }, { x: 87, y: 67.5, rx: 10.5, ry: 8.5 }],
+  mouth: { x: 65.5, y: 104, rx: 23, ry: 12 },
 };
 
 const FRAME_NAMES: PosterFrame[] = ['neutral', 'blink-half', 'blink', 'smile-half', 'smile'];
@@ -43,7 +43,7 @@ export function makePosterPhotoFrame(source: Uint8ClampedArray, width: number, h
   const output = new Uint8ClampedArray(source);
   if (frame === 'neutral') return output;
   const blink = frame === 'blink' || frame === 'blink-half';
-  const strength = frame === 'blink-half' || frame === 'smile-half' ? 0.5 : 1;
+  const strength = frame === 'blink-half' ? 0.6 : frame === 'smile-half' ? 0.5 : 1;
   const sx = width / POSTER_PHOTO_WIDTH, sy = height / POSTER_PHOTO_HEIGHT;
   const regions = blink ? POSTER_PHOTO_FEATURES.eyes : [POSTER_PHOTO_FEATURES.mouth];
   for (const region of regions) {
@@ -57,18 +57,25 @@ export function makePosterPhotoFrame(source: Uint8ClampedArray, width: number, h
         const fade = (1 - radius) * (1 - radius);
         let sourceX = x, sourceY = y;
         if (blink) {
-          // 눈을 얇은 선으로 접으면서 위·아래 피부를 그 자리로 자연스럽게 끌어옴.
-          const aperture = 1 - strength * 0.92 * fade;
-          const core = ry * 0.55;
-          const compressed = core * aperture;
-          const distance = Math.abs(y - cy);
-          const restored = distance <= compressed ? distance / aperture
-            : core + (distance - compressed) * (ry - core) / (ry - compressed);
-          sourceY = cy + Math.sign(y - cy) * restored;
+          // 눈 전체가 감기도록 중앙 영역은 충분히 압축하고, 가장자리에서만 부드럽게 완화.
+          const edge = Math.max(0, Math.min(1, (radius - 0.45) / 0.55));
+          const coverage = 1 - edge * edge * (3 - 2 * edge);
+          const aperture = 1 - strength * 0.985 * coverage;
+          const core = ry * 0.4;
+          const closingLid = core - 2 * core * aperture;
+          const localY = y - cy;
+          // 아래 눈꺼풀은 두고 위 눈꺼풀이 내려와 흰자·홍채를 덮는 방향으로 이동.
+          const restored = localY <= closingLid
+            ? -ry + (localY + ry) * (ry - core) / (closingLid + ry)
+            : localY <= core ? -core + (localY - closingLid) / aperture : localY;
+          sourceY = cy + restored;
         } else {
-          // 한쪽 입꼬리를 눈에 띄게 위·바깥으로 당기되 경계에서 원본으로 부드럽게 연결.
-          sourceY += 9 * sy * strength * fade;
-          sourceX -= 3 * sx * strength * fade;
+          // 입 중앙은 고정하고 양쪽 모서리를 같은 세기로 위·바깥으로 당김.
+          const distanceFromCenter = Math.abs(x - cx) / sx;
+          const t = Math.max(0, Math.min(1, (distanceFromCenter - 2.5) / 3));
+          const corner = t * t * (3 - 2 * t) * Math.exp(-(((distanceFromCenter - 12) / 4.5) ** 2));
+          sourceY += 9 * sy * strength * fade * corner;
+          sourceX -= Math.sign(x - cx) * 3 * sx * strength * fade * corner;
         }
         sample(source, width, height, sourceX, sourceY, output, (y * width + x) * 4);
       }

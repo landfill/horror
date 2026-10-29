@@ -84,3 +84,48 @@ test('the portrait loads once and prepares all cached frames before reporting re
   assert.deepEqual(prepared[0].data, pixels);
   assert.equal(requests, 1);
 });
+
+test('full blink closes the bright eye area substantially on both eyes', () => {
+  const eyePixels = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const isEye = api.POSTER_PHOTO_FEATURES.eyes.some(eye => ((x - eye.x) / 6) ** 2 + ((y - eye.y) / 3) ** 2 < 1);
+    const offset = (y * width + x) * 4;
+    eyePixels.fill(isEye ? 230 : 85, offset, offset + 3);
+    eyePixels[offset + 3] = 255;
+  }
+  const closed = api.makePosterPhotoFrame(eyePixels, width, height, 'blink');
+  const half = api.makePosterPhotoFrame(eyePixels, width, height, 'blink-half');
+  for (const eye of api.POSTER_PHOTO_FEATURES.eyes) {
+    const brightCount = (data) => {
+      let count = 0;
+      for (let y = Math.floor(eye.y - 5); y <= Math.ceil(eye.y + 5); y++) {
+        for (let x = Math.floor(eye.x - 7); x <= Math.ceil(eye.x + 7); x++) {
+          if (data[(y * width + x) * 4] > 180) count++;
+        }
+      }
+      return count;
+    };
+    assert.ok(brightCount(closed) < brightCount(eyePixels) * .25, 'closed eye exposes less than a quarter of its opening');
+    assert.ok(brightCount(half) > brightCount(closed), 'closing and closed frames remain distinct');
+  }
+});
+
+test('smile lifts both mouth corners equally and keeps the mouth center still', () => {
+  // Pixel channels encode their source coordinates, so the displacement is directly observable.
+  const grid = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const offset = (y * width + x) * 4;
+    grid[offset] = y; grid[offset + 1] = x; grid[offset + 3] = 255;
+  }
+  const result = api.makePosterPhotoFrame(grid, width, height, 'smile');
+  const left = (104 * width + 55) * 4;
+  const right = (104 * width + 76) * 4;
+  assert.ok(result[left] >= 109 && result[right] >= 109, 'both corners visibly rise');
+  assert.equal(result[left], result[right], 'vertical pull is balanced');
+  assert.equal(result[left + 1] + result[right + 1], 131, 'horizontal pull mirrors around the mouth center');
+  for (const x of [65, 66]) {
+    const offset = (104 * width + x) * 4;
+    assert.equal(result[offset], 104);
+    assert.equal(result[offset + 1], x);
+  }
+});

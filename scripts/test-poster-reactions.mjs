@@ -53,8 +53,10 @@ test('passing selects only one nearby poster and blink returns to the neutral im
   controller.update(.09, position, forward, false);
   assert.equal(a.mesh.material.name, '0:blink');
   controller.update(.13, position, forward, false);
+  assert.equal(a.mesh.material.name, '0:blink', 'closed eyelids remain visible long enough while passing');
+  controller.update(.24, position, forward, false);
   assert.equal(a.mesh.material.name, '0:blink-half');
-  controller.update(.2, position, forward, false);
+  controller.update(.3, position, forward, false);
   assert.equal(a.mesh.material, original);
   assert.equal(controller.isReacting, false);
   assert.equal(requests(), prepared, 'animation creates no new materials or textures');
